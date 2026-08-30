@@ -14,4 +14,20 @@ Aplicación responsive para operar estacionamientos públicos con la arquitectur
 
 1. Copia `.env.example` a `.env.local`.
 2. Ejecuta `supabase/migrations/20260830150000_syntra_parkflow.sql` en Supabase.
-3. Ejecuta `npm install` y `npm run dev`.
+3. Ejecuta `supabase/migrations/20260830170000_profiles_roles_permissions.sql` para crear perfiles, roles y permisos.
+4. Ejecuta `npm install` y `npm run dev`.
+
+El frontend puede recuperar el contexto completo del usuario con:
+
+```sql
+select * from public.get_my_parking_context();
+```
+
+Y validar una acción específica mediante:
+
+```sql
+select public.has_parking_permission(
+  'UUID_DE_LA_EMPRESA',
+  'stays.checkout'
+);
+```
