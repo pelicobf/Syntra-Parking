@@ -1,5 +1,5 @@
 "use client";
-import { FormEvent, useMemo, useState } from "react";
+import { FormEvent, useEffect, useState } from "react";
 import { ArrowRightLeft, BarChart3, CarFront, ChevronRight, CircleDollarSign, Clock3, LayoutDashboard, LogOut, ParkingCircle, Plus, ScanLine, Search, Settings2, TicketCheck, Users, WalletCards, type LucideIcon } from "lucide-react";
 import { TicketCodes } from "@/app/components/codes";
 import { isDemoMode } from "@/app/lib/supabase";
@@ -23,6 +23,8 @@ export default function Home(){
   const store=useParkingStore(); const [module,setModule]=useState<AppModule>("dashboard"); const [query,setQuery]=useState(""); const [modal,setModal]=useState<"entry"|"checkout"|"ticket"|"closeShift"|null>(null);
   const [plate,setPlate]=useState(""); const [selected,setSelected]=useState<ParkingStay|null>(null); const [method,setMethod]=useState<Payment["method"]>("cash"); const [toast,setToast]=useState("");
   const [stayFilter,setStayFilter]=useState<"all"|"inside"|"pending">("all");
+  const [hydrated,setHydrated]=useState(false);
+  useEffect(()=>setHydrated(true),[]);
   const filtered=store.active.filter(s=>`${s.plate} ${s.make} ${s.model} ${s.folio}`.toLowerCase().includes(query.toLowerCase()));
   const visibleStays=filtered.filter(s=>stayFilter==="all"||(stayFilter==="pending"?s.status==="pending_payment":s.status!=="pending_payment"));
   const pendingCount=store.active.filter(s=>s.status==="pending_payment").length;
@@ -33,6 +35,7 @@ export default function Home(){
   function openCheckout(stay?:ParkingStay){setSelected(stay??store.active.find(s=>s.status==="pending_payment")??store.active[0]??null);setModal("checkout")}
   function pay(){if(!selected)return;const amount=store.charge(selected,method);setModal(null);notify(`Salida registrada · ${currency.format(amount)}`)}
   const titles:Record<AppModule,[string,string]>={dashboard:["Resumen","Panorama operativo en tiempo real"],entries:["Entradas y salidas","Control de accesos y cobros"],vehicles:["Vehículos","Estancias activas e historial"],shifts:["Turnos y caja","Apertura, movimientos y corte"],reports:["Reportes","Indicadores de operación e ingresos"],staff:["Personal","Usuarios, roles y sucursales"],settings:["Configuración","Tarifas, espacios y dispositivos"]};
+  if(!hydrated)return <div className="app-loading" role="status" aria-live="polite"><Brand/><span className="loading-ring"/><p>Preparando tu estacionamiento…</p></div>;
   return <div className="shell">
     <aside className="sidebar"><Brand/><nav>{nav.map(item=>{const Icon=item.icon;return <div key={item.id}>{item.group&&<p>{item.group}</p>}<button className={module===item.id?"active":""} onClick={()=>setModule(item.id)}><span><Icon size={18}/></span>{item.label}{item.id==="vehicles"&&<em>{store.active.length}</em>}</button></div>})}</nav><div className="side-profile"><span>MR</span><div><b>{store.profile.fullName}</b><small>Administrador</small></div><button aria-label="Cerrar sesión"><LogOut size={17}/></button></div></aside>
     <main><header className="topbar"><div className="top-title"><button className="mobile-brand"><Brand/></button><div><h1>{titles[module][0]}</h1><p>{titles[module][1]}</p></div></div><div className="top-controls"><label><span>Sucursal</span><select value={store.lotId} onChange={e=>store.setLotId(e.target.value)}>{store.lots.filter(l=>store.profile.allowedLotIds.includes(l.id)).map(l=><option key={l.id} value={l.id}>{l.name}</option>)}</select></label><span className="online"><i/>{isDemoMode?"Modo demostración":"Sincronizado"}</span><button className="primary" onClick={()=>openCheckout()}><ScanLine size={17}/> <span>Escanear boleto</span></button></div></header>

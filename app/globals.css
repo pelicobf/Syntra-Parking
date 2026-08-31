@@ -29,3 +29,4 @@ html,body{font-family:Inter,ui-sans-serif,-apple-system,BlinkMacSystemFont,"Sego
 .summary-icon.blue,.stat-icon.blue,.action-icon.blue{background:#e8f3f6;color:var(--blue)}
 .stay-filters button.active{color:var(--blue);box-shadow:0 2px 8px rgba(16,42,67,.12)}
 .mobile-nav button.active{color:var(--blue)}.mobile-nav .scan-fab{background:var(--blue);box-shadow:0 8px 20px rgba(15,76,92,.3)}
+.app-loading{min-height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:18px;background:radial-gradient(circle at 50% 42%,#fff 0,#f4f7fa 48%,#eaf0f4 100%);color:var(--muted)}.app-loading .brand b{color:var(--navy)}.app-loading .brand small{color:#71879a}.app-loading p{margin:0;font-size:11px;font-weight:700;letter-spacing:.2px}.loading-ring{width:30px;height:30px;border:3px solid #dce7ec;border-top-color:var(--blue);border-radius:50%;animation:parkflow-spin .75s linear infinite}@keyframes parkflow-spin{to{transform:rotate(360deg)}}
