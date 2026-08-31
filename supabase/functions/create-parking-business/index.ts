@@ -53,7 +53,7 @@ Deno.serve(async (req) => {
     email: ownerEmail,
     password: ownerPassword,
     email_confirm: true,
-    user_metadata: { full_name: ownerName },
+    user_metadata: { full_name: ownerName, business_name: businessName },
   });
   if (createUserError || !created.user) {
     const message = createUserError?.message ?? "No se pudo crear el propietario";
