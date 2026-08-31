@@ -14,7 +14,8 @@ const fallbackRate:RatePlan={id:"general",lotId:"centro",name:"Tarifa general",f
 const fallbackShift:Shift={id:"shift-1",lotId:"centro",openedAt:new Date(now-6*3600000).toISOString(),openedBy:"Marco Ruiz",openingCash:500,status:"open"};
 type EntryInput={plate:string;make?:string;model?:string;color?:string};
 type RemoteContext={businessId:string;userId:string}|null;
-export type StaffRecord={id:string;fullName:string;email:string;role:string;lotIds:string[];status:"active"|"invited"};
+export type StaffRecord={id:string;fullName:string;email:string;role:string;lotIds:string[];status:"active"|"inactive"|"invited"};
+export type CreatedStaffRecord=StaffRecord&{temporaryPassword:string};
 
 export function useParkingStore(){
   const [lots,setLots]=useState(fallbackLots),[lotId,setLotId]=useState("centro"),[profile,setProfile]=useState(fallbackProfile);
@@ -86,9 +87,35 @@ export function useParkingStore(){
   async function registerBusiness(input:{name:string;slug:string;lotName:string;lotCode:string;capacity:number;ownerName:string;ownerEmail:string;ownerPassword:string}){if(!supabase)throw new Error("Faltan las credenciales públicas de Supabase");const {data,error}=await supabase.functions.invoke("create-parking-business",{body:{business_name:input.name,slug:input.slug,lot_name:input.lotName,lot_code:input.lotCode,capacity:input.capacity,owner_name:input.ownerName,owner_email:input.ownerEmail,owner_password:input.ownerPassword}});if(error)throw new Error((data as {error?:string}|null)?.error||error.message);if((data as {error?:string}|null)?.error)throw new Error((data as {error:string}).error);const {error:loginError}=await supabase.auth.signInWithPassword({email:input.ownerEmail,password:input.ownerPassword});if(loginError)throw loginError;setSource("loading");setAuthState("checking");await loadRemote();return data;}
   async function signOut(){if(supabase)await supabase.auth.signOut();remote.current=null;setLots(fallbackLots);setLotId("centro");setBusinessName("Empresa");setProfile(fallbackProfile);setStays(fallbackStays);setPayments([]);setRate(fallbackRate);setShift(fallbackShift);setStaff([]);setSource("fallback");setAuthState("unauthenticated");setSyncError("Sesión cerrada");}
   function continueDemo(){setSource("fallback");setAuthState("demo");setSyncError("Modo demostración");}
-  async function inviteStaff(input:{fullName:string;email:string;role:string;lotIds:string[]}){if(remote.current&&supabase){const {data,error}=await supabase.rpc("invite_parking_user",{p_email:input.email,p_full_name:input.fullName,p_role:input.role,p_lot_ids:input.lotIds});if(error)throw error;const row:StaffRecord={id:String(data),...input,status:"invited"};setStaff(v=>[row,...v]);return row;}const row:StaffRecord={id:crypto.randomUUID(),...input,status:"invited"};setStaff(v=>[row,...v]);return row;}
+  async function inviteStaff(input:{fullName:string;email:string;role:string;lotIds:string[]}):Promise<CreatedStaffRecord>{
+    if(remote.current&&supabase){
+      const {data,error}=await supabase.functions.invoke("create-parking-user",{body:{full_name:input.fullName,email:input.email,role:input.role,lot_ids:input.lotIds}});
+      const response=data as {error?:string;user?:{id:string;full_name:string;email:string;role:string;lot_ids:string[];temporary_password:string}}|null;
+      if(error)throw new Error(response?.error||error.message);
+      if(response?.error||!response?.user)throw new Error(response?.error||"No fue posible crear el usuario");
+      const row:StaffRecord={id:response.user.id,fullName:response.user.full_name,email:response.user.email,role:response.user.role,lotIds:response.user.lot_ids,status:"active"};
+      setStaff(v=>[row,...v]);
+      return{...row,temporaryPassword:response.user.temporary_password};
+    }
+    const temporaryPassword=`Park-${crypto.randomUUID().slice(0,8)}!`;
+    const row:StaffRecord={id:crypto.randomUUID(),...input,status:"active"};
+    setStaff(v=>[row,...v]);
+    return{...row,temporaryPassword};
+  }
+  async function updateStaff(input:{id:string;fullName:string;email?:string;role:string;lotIds:string[];active:boolean;newPassword?:string}):Promise<StaffRecord>{
+    if(remote.current&&supabase){
+      const {data,error}=await supabase.functions.invoke("update-parking-user",{body:{membership_id:input.id,full_name:input.fullName,email:input.email||undefined,role:input.role,lot_ids:input.lotIds,active:input.active,new_password:input.newPassword||undefined}});
+      const response=data as {error?:string;user?:{id:string;full_name:string;email:string;role:string;lot_ids:string[];active:boolean}}|null;
+      if(error)throw new Error(response?.error||error.message);
+      if(response?.error||!response?.user)throw new Error(response?.error||"No fue posible actualizar el usuario");
+      const row:StaffRecord={id:response.user.id,fullName:response.user.full_name,email:response.user.email||input.email||"Usuario registrado",role:response.user.role,lotIds:response.user.lot_ids,status:response.user.active?"active":"inactive"};
+      setStaff(v=>v.map(item=>item.id===row.id?row:item));return row;
+    }
+    const row:StaffRecord={id:input.id,fullName:input.fullName,email:input.email||"Usuario registrado",role:input.role,lotIds:input.lotIds,status:input.active?"active":"inactive"};
+    setStaff(v=>v.map(item=>item.id===row.id?row:item));return row;
+  }
   async function createBusiness(input:{name:string;slug:string;lotName:string;lotCode:string;capacity:number;ownerName?:string;ownerEmail?:string;ownerPassword?:string}){if(profile.role!=="super_admin")throw new Error("Solo el super administrador puede crear negocios");if(!supabase)throw new Error("Supabase no está configurado");if(!input.ownerName?.trim()||!input.ownerEmail?.trim())throw new Error("Completa los datos del propietario");if(!input.ownerPassword||input.ownerPassword.length<8)throw new Error("La contraseña debe tener al menos 8 caracteres");const {data,error}=await supabase.functions.invoke("create-parking-business",{body:{business_name:input.name,slug:input.slug,lot_name:input.lotName,lot_code:input.lotCode,capacity:input.capacity,owner_name:input.ownerName,owner_email:input.ownerEmail,owner_password:input.ownerPassword}});if(error)throw new Error((data as {error?:string}|null)?.error||error.message);if((data as {error?:string}|null)?.error)throw new Error((data as {error:string}).error);await loadRemote();return data;}
   const canManageStaff=["super_admin","owner","admin"].includes(profile.role);
-  return{profile,businessName,lots,lotId,setLotId,lot,stays,active,payments,rate:currentRate,setRate,saveRate,shift,setShift,registerEntry,charge,calculate:(stay:ParkingStay)=>calculateFee(stay.enteredAt,currentRate),source,syncError,reload:loadRemote,authState,signIn,signUp,registerBusiness,signOut,continueDemo,staff,inviteStaff,createBusiness,canManageStaff};
+  return{profile,businessName,lots,lotId,setLotId,lot,stays,active,payments,rate:currentRate,setRate,saveRate,shift,setShift,registerEntry,charge,calculate:(stay:ParkingStay)=>calculateFee(stay.enteredAt,currentRate),source,syncError,reload:loadRemote,authState,signIn,signUp,registerBusiness,signOut,continueDemo,staff,inviteStaff,updateStaff,createBusiness,canManageStaff};
 }
 function mapRate(r:any):RatePlan{return{id:String(r.id),lotId:String(r.lot_id),name:String(r.name),fractionMinutes:Number(r.fraction_minutes) as 15|30|45|60,price:Number(r.price_per_fraction),graceMinutes:Number(r.grace_minutes),dailyMax:r.daily_max==null?null:Number(r.daily_max),lostTicketFee:Number(r.lost_ticket_fee)}}
