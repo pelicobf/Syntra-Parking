@@ -1,5 +1,5 @@
 export type AppModule = "dashboard" | "entries" | "vehicles" | "shifts" | "reports" | "staff" | "settings";
-export type UserRole = "owner" | "admin" | "cashier" | "operator" | "viewer";
+export type UserRole = "super_admin" | "owner" | "admin" | "cashier" | "operator" | "viewer";
 export type StayStatus = "active" | "pending_payment" | "paid" | "cancelled" | "lost_ticket";
 
 export type ParkingLot = { id: string; businessId: string; name: string; code: string; capacity: number; active: boolean };
