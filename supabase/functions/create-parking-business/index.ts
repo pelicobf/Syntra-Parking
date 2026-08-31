@@ -76,5 +76,27 @@ Deno.serve(async (req) => {
     return reply({ error: businessError.message }, 400);
   }
 
-  return reply({ business, owner: { id: created.user.id, name: ownerName, email: ownerEmail, role: "owner" } });
+  const createdBusiness = business as { business_id?: string; lot_id?: string } | null;
+  if (!createdBusiness?.business_id || !createdBusiness?.lot_id) {
+    await admin.auth.admin.deleteUser(created.user.id);
+    return reply({ error: "La empresa se creó sin una sucursal válida" }, 500);
+  }
+  const { data: cashRegister, error: cashRegisterError } = await admin
+    .from("parking_cash_registers")
+    .insert({
+      business_id: createdBusiness.business_id,
+      lot_id: createdBusiness.lot_id,
+      name: "Caja principal",
+      code: "MAIN",
+      active: true,
+    })
+    .select("id,name,code")
+    .single();
+  if (cashRegisterError) {
+    await admin.from("parking_businesses").delete().eq("id", createdBusiness.business_id);
+    await admin.auth.admin.deleteUser(created.user.id);
+    return reply({ error: `No se pudo crear la caja principal: ${cashRegisterError.message}` }, 400);
+  }
+
+  return reply({ business, cash_register: cashRegister, owner: { id: created.user.id, name: ownerName, email: ownerEmail, role: "owner" } });
 });
