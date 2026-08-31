@@ -116,26 +116,27 @@ end;
 $$;
 
 drop function if exists public.create_parking_business_with_responsible(text,text,text,text,integer,text,text,public.parkflow_role);
-create function public.create_parking_business_with_responsible(
+drop function if exists public.create_parking_business_with_owner(text,text,text,text,integer,uuid,text,text);
+create function public.create_parking_business_with_owner(
   p_name text,
   p_slug text,
   p_lot_name text,
   p_lot_code text,
   p_capacity integer,
-  p_responsible_name text,
-  p_responsible_email text,
-  p_responsible_role public.parkflow_role
+  p_owner_user_id uuid,
+  p_owner_name text,
+  p_owner_email text
 ) returns jsonb
 language plpgsql security definer set search_path=public as $$
 declare
   v_business_id uuid;
   v_lot_id uuid;
-  v_invitation_id uuid;
+  v_membership_id uuid;
+  v_owner_role_id uuid;
 begin
-  if not public.is_parkflow_super_admin() then raise exception 'Solo el super administrador puede crear empresas'; end if;
-  if p_responsible_role not in ('owner','admin') then raise exception 'El responsable debe ser propietario o administrador'; end if;
   if coalesce(trim(p_name),'')='' or coalesce(trim(p_slug),'')='' or coalesce(trim(p_lot_name),'')='' then raise exception 'Completa los datos de la empresa y sucursal'; end if;
-  if coalesce(trim(p_responsible_name),'')='' or coalesce(trim(p_responsible_email),'')='' then raise exception 'Completa los datos del responsable'; end if;
+  if p_owner_user_id is null or coalesce(trim(p_owner_name),'')='' or coalesce(trim(p_owner_email),'')='' then raise exception 'Completa los datos del propietario'; end if;
+  if not exists(select 1 from auth.users where id=p_owner_user_id and lower(email)=lower(trim(p_owner_email))) then raise exception 'La cuenta del propietario no existe'; end if;
   if p_capacity<1 then raise exception 'La capacidad debe ser mayor que cero'; end if;
 
   insert into public.parking_businesses(name,slug)
@@ -144,11 +145,14 @@ begin
     values(v_business_id,trim(p_lot_name),upper(trim(p_lot_code)),p_capacity) returning id into v_lot_id;
   insert into public.parking_rate_plans(business_id,lot_id,name,fraction_minutes,price_per_fraction,grace_minutes,lost_ticket_fee)
     values(v_business_id,v_lot_id,'Tarifa general',15,0,0,0);
-  insert into public.parking_user_invitations(business_id,email,full_name,role,lot_ids,invited_by)
-    values(v_business_id,lower(trim(p_responsible_email)),trim(p_responsible_name),p_responsible_role,array[v_lot_id],auth.uid())
-    returning id into v_invitation_id;
+  perform public.seed_parking_roles(v_business_id);
+  select id into v_owner_role_id from public.parking_roles where business_id=v_business_id and key='owner' and active limit 1;
+  insert into public.parking_memberships(business_id,user_id,full_name,role,role_id,lot_ids,active)
+    values(v_business_id,p_owner_user_id,trim(p_owner_name),'owner',v_owner_role_id,array[v_lot_id],true)
+    returning id into v_membership_id;
+  insert into public.parking_membership_lots(membership_id,lot_id) values(v_membership_id,v_lot_id);
 
-  return jsonb_build_object('business_id',v_business_id,'lot_id',v_lot_id,'invitation_id',v_invitation_id);
+  return jsonb_build_object('business_id',v_business_id,'lot_id',v_lot_id,'owner_user_id',p_owner_user_id);
 end;
 $$;
 drop trigger if exists accept_parkflow_invitation_after_signup on auth.users;
@@ -180,11 +184,12 @@ create policy "super admins read profiles" on public.profiles for select to auth
 revoke all on function public.is_parkflow_super_admin() from public,anon;
 revoke all on function public.invite_parking_user(text,text,public.parkflow_role,uuid[]) from public,anon;
 revoke all on function public.create_parking_business(text,text,text,text,integer) from public,anon;
-revoke all on function public.create_parking_business_with_responsible(text,text,text,text,integer,text,text,public.parkflow_role) from public,anon;
+revoke all on function public.create_parking_business_with_owner(text,text,text,text,integer,uuid,text,text) from public,anon;
+revoke all on function public.create_parking_business_with_owner(text,text,text,text,integer,uuid,text,text) from authenticated;
 grant execute on function public.is_parkflow_super_admin() to authenticated;
 grant execute on function public.invite_parking_user(text,text,public.parkflow_role,uuid[]) to authenticated;
 grant execute on function public.create_parking_business(text,text,text,text,integer) to authenticated;
-grant execute on function public.create_parking_business_with_responsible(text,text,text,text,integer,text,text,public.parkflow_role) to authenticated;
+grant execute on function public.create_parking_business_with_owner(text,text,text,text,integer,uuid,text,text) to service_role;
 
 commit;
 
