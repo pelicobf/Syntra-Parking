@@ -98,5 +98,50 @@ Deno.serve(async (req) => {
     return reply({ error: `No se pudo crear la caja principal: ${cashRegisterError.message}` }, 400);
   }
 
-  return reply({ business, cash_register: cashRegister, owner: { id: created.user.id, name: ownerName, email: ownerEmail, role: "owner" } });
+  const { data: vehicleTypes, error: vehicleTypesError } = await admin
+    .from("parking_vehicle_types")
+    .insert([
+      { business_id: createdBusiness.business_id, name: "Carro", key: "car", description: "Automóvil o sedán" },
+      { business_id: createdBusiness.business_id, name: "Camioneta", key: "suv", description: "SUV, pickup o vehículo familiar" },
+      { business_id: createdBusiness.business_id, name: "Camión", key: "truck", description: "Camión o vehículo de carga" },
+    ])
+    .select("id,name,key");
+  if (vehicleTypesError || !vehicleTypes?.length) {
+    await admin.from("parking_businesses").delete().eq("id", createdBusiness.business_id);
+    await admin.auth.admin.deleteUser(created.user.id);
+    return reply({ error: `No se pudieron crear los tipos de unidad: ${vehicleTypesError?.message ?? "Sin datos"}` }, 400);
+  }
+  const { data: baseRate, error: baseRateError } = await admin
+    .from("parking_rate_plans")
+    .select("id,fraction_minutes,price_per_fraction,grace_minutes,daily_max,lost_ticket_fee")
+    .eq("lot_id", createdBusiness.lot_id)
+    .limit(1)
+    .single();
+  const carType = vehicleTypes.find((type) => type.key === "car");
+  if (baseRateError || !baseRate || !carType) {
+    await admin.from("parking_businesses").delete().eq("id", createdBusiness.business_id);
+    await admin.auth.admin.deleteUser(created.user.id);
+    return reply({ error: "No se pudo configurar la tarifa inicial por unidad" }, 400);
+  }
+  const { error: carRateError } = await admin.from("parking_rate_plans").update({ vehicle_type_id: carType.id, name: "Tarifa carro" }).eq("id", baseRate.id);
+  const additionalRates = vehicleTypes.filter((type) => type.key !== "car").map((type) => ({
+    business_id: createdBusiness.business_id,
+    lot_id: createdBusiness.lot_id,
+    vehicle_type_id: type.id,
+    name: `Tarifa ${type.name.toLowerCase()}`,
+    fraction_minutes: baseRate.fraction_minutes,
+    price_per_fraction: baseRate.price_per_fraction,
+    grace_minutes: baseRate.grace_minutes,
+    daily_max: baseRate.daily_max,
+    lost_ticket_fee: baseRate.lost_ticket_fee,
+    active: true,
+  }));
+  const { error: additionalRatesError } = await admin.from("parking_rate_plans").insert(additionalRates);
+  if (carRateError || additionalRatesError) {
+    await admin.from("parking_businesses").delete().eq("id", createdBusiness.business_id);
+    await admin.auth.admin.deleteUser(created.user.id);
+    return reply({ error: `No se pudieron crear las tarifas por unidad: ${carRateError?.message ?? additionalRatesError?.message}` }, 400);
+  }
+
+  return reply({ business, cash_register: cashRegister, vehicle_types: vehicleTypes, owner: { id: created.user.id, name: ownerName, email: ownerEmail, role: "owner" } });
 });
