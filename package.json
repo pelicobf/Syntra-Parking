@@ -13,6 +13,7 @@
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.112.4",
+    "@syntra/login": "github:pelicobf/login-syntra",
     "jsbarcode": "^3.12.3",
     "lucide-react": "^1.37.0",
     "qrcode": "^1.5.4",
