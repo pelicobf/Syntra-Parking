@@ -33,11 +33,46 @@ export function useParkingStore(){
   const [platformBusinesses,setPlatformBusinesses]=useState<PlatformBusiness[]>([]),[platformLots,setPlatformLots]=useState<ParkingLot[]>([]),[platformSubscriptionPayments,setPlatformSubscriptionPayments]=useState<PlatformSubscriptionPayment[]>([]),[selectedBusinessId,setSelectedBusinessId]=useState("");
   const remote=useRef<RemoteContext>(null);
   const commercialLoaded=useRef(false);
+  const realtimeTimer=useRef<ReturnType<typeof setTimeout>|null>(null);
+  const realtimeReloading=useRef(false);
 
   useEffect(()=>{void loadRemote();},[]);
   useEffect(()=>{if(!supabase||authState!=="authenticated")return;void supabase.auth.getUser().then(({data})=>{if(data.user?.email)setProfile(current=>({...current,email:data.user!.email}))})},[authState]);
   useEffect(()=>{if(!supabase||authState!=="authenticated"||profile.role!=="super_admin"||selectedBusinessId||!platformBusinesses.length||commercialLoaded.current)return;commercialLoaded.current=true;void Promise.all([supabase.from("parking_businesses").select("id,plan_price,plan_expires_at"),supabase.from("parking_subscription_payments").select("id,business_id,plan_type,amount,period_start,period_end,paid_at,payment_method,reference,notes").order("paid_at",{ascending:false})]).then(([businessResult,paymentResult])=>{if(businessResult.error||paymentResult.error){commercialLoaded.current=false;setSyncError(businessResult.error?.message??paymentResult.error?.message??"");return}const commercial=new Map((businessResult.data??[]).map((row:any)=>[String(row.id),row]));setPlatformBusinesses(value=>value.map(item=>{const row=commercial.get(item.id);return row?{...item,planPrice:Number(row.plan_price??0),planExpiresAt:row.plan_expires_at?String(row.plan_expires_at):item.planExpiresAt}:item}));setPlatformSubscriptionPayments((paymentResult.data??[]).map((row:any)=>({id:String(row.id),businessId:String(row.business_id),planType:row.plan_type==="annual"?"annual":"monthly",amount:Number(row.amount),periodStart:String(row.period_start),periodEnd:String(row.period_end),paidAt:String(row.paid_at),paymentMethod:String(row.payment_method),reference:row.reference?String(row.reference):null,notes:row.notes?String(row.notes):null})))})},[authState,profile.role,selectedBusinessId,platformBusinesses.length]);
   useEffect(()=>{if(source==="supabase"&&remote.current&&lotId)void refreshShiftForLot(lotId);},[lotId,source]);
+  useEffect(()=>{
+    if(!supabase||authState!=="authenticated"||source!=="supabase")return;
+    const globalView=profile.role==="super_admin"&&!selectedBusinessId;
+    const businessId=selectedBusinessId||remote.current?.businessId||"";
+    const tables=globalView
+      ?["parking_businesses","parking_lots","parking_memberships","parking_subscription_payments"]
+      :["parking_businesses","parking_lots","parking_memberships","parking_rate_plans","parking_vehicle_types","parking_cash_registers","parking_shifts","parking_stays","parking_payments","parking_subscription_payments","parking_roles","parking_role_permissions","parking_membership_lots"];
+    const refresh=()=>{
+      if(realtimeTimer.current)clearTimeout(realtimeTimer.current);
+      realtimeTimer.current=setTimeout(()=>{
+        if(realtimeReloading.current)return;
+        realtimeReloading.current=true;
+        if(globalView)commercialLoaded.current=false;
+        void loadRemote(globalView?"":businessId,true)
+          .then(()=>globalView?refreshPlatformCommercial():undefined)
+          .finally(()=>{realtimeReloading.current=false;});
+      },300);
+    };
+    let channel=supabase.channel(`parkflow:${globalView?"platform":businessId||"business"}:${crypto.randomUUID()}`);
+    tables.forEach(table=>{channel=channel.on("postgres_changes",{event:"*",schema:"public",table},refresh)});
+    channel.subscribe(status=>{if(status==="CHANNEL_ERROR"||status==="TIMED_OUT")setSyncError("La sincronización en vivo se interrumpió; se reintentará automáticamente.");});
+    const onVisible=()=>{if(document.visibilityState==="visible")refresh();};
+    window.addEventListener("focus",refresh);
+    document.addEventListener("visibilitychange",onVisible);
+    const interval=window.setInterval(refresh,60000);
+    return()=>{
+      if(realtimeTimer.current)clearTimeout(realtimeTimer.current);
+      window.clearInterval(interval);
+      window.removeEventListener("focus",refresh);
+      document.removeEventListener("visibilitychange",onVisible);
+      void supabase.removeChannel(channel);
+    };
+  },[authState,source,profile.role,selectedBusinessId]);
   function closedShift(forLotId:string):Shift{return{id:"",lotId:forLotId,cashRegisterId:undefined,openedAt:"",openedBy:"",openingCash:0,status:"closed"}}
   async function refreshShiftForLot(forLotId:string){
     if(!supabase||!remote.current)return;
@@ -45,7 +80,19 @@ export function useParkingStore(){
     if(error){setSyncError(error.message);return}
     setShift(data?{id:String(data.id),lotId:String(data.lot_id),cashRegisterId:data.cash_register_id?String(data.cash_register_id):undefined,openedAt:String(data.opened_at),openedBy:profile.fullName||"Usuario",openingCash:Number(data.opening_cash),status:"open"}:closedShift(forLotId));
   }
-  async function loadRemote(businessOverride?:string){
+  async function refreshPlatformCommercial(){
+    if(!supabase)return;
+    const [businessResult,paymentResult]=await Promise.all([
+      supabase.from("parking_businesses").select("id,plan_price,plan_expires_at"),
+      supabase.from("parking_subscription_payments").select("id,business_id,plan_type,amount,period_start,period_end,paid_at,payment_method,reference,notes").order("paid_at",{ascending:false}),
+    ]);
+    if(businessResult.error||paymentResult.error){setSyncError(businessResult.error?.message??paymentResult.error?.message??"");return;}
+    const commercial=new Map((businessResult.data??[]).map((row:any)=>[String(row.id),row]));
+    setPlatformBusinesses(value=>value.map(item=>{const row=commercial.get(item.id);return row?{...item,planPrice:Number(row.plan_price??0),planExpiresAt:row.plan_expires_at?String(row.plan_expires_at):item.planExpiresAt}:item}));
+    setPlatformSubscriptionPayments((paymentResult.data??[]).map((row:any)=>({id:String(row.id),businessId:String(row.business_id),planType:row.plan_type==="annual"?"annual":"monthly",amount:Number(row.amount),periodStart:String(row.period_start),periodEnd:String(row.period_end),paidAt:String(row.paid_at),paymentMethod:String(row.payment_method),reference:row.reference?String(row.reference):null,notes:row.notes?String(row.notes):null})));
+    commercialLoaded.current=true;
+  }
+  async function loadRemote(businessOverride?:string,silent=false){
     if(!supabase){setSource("fallback");setAuthState("unauthenticated");return;}
     try{
       const {data:{user}}=await supabase.auth.getUser();
@@ -84,7 +131,7 @@ export function useParkingStore(){
       if(shiftRows?.[0]&&String(shiftRows[0].lot_id)===selected)setShift({id:String(shiftRows[0].id),lotId:String(shiftRows[0].lot_id),cashRegisterId:shiftRows[0].cash_register_id?String(shiftRows[0].cash_register_id):undefined,openedAt:String(shiftRows[0].opened_at),openedBy:effectiveName,openingCash:Number(shiftRows[0].opening_cash),status:"open"});else setShift(closedShift(selected));
       if(platformAdmin)setSelectedBusinessId(businessId);
       setSource("supabase");setAuthState("authenticated");setSyncError("");
-    }catch(error){console.warn("ParkFlow fallback:",error);remote.current=null;setSource("fallback");setAuthState("unauthenticated");setSyncError(error instanceof Error?error.message:"No fue posible consultar Supabase");}
+    }catch(error){console.warn("ParkFlow fallback:",error);setSyncError(error instanceof Error?error.message:"No fue posible consultar Supabase");if(!silent){remote.current=null;setSource("fallback");setAuthState("unauthenticated");}}
   }
 
   const active=useMemo(()=>stays.filter(s=>s.lotId===lotId&&(s.status==="active"||s.status==="pending_payment")),[stays,lotId]);
