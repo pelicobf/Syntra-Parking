@@ -3,7 +3,7 @@ export type UserRole = "super_admin" | "owner" | "admin" | "cashier" | "operator
 export type StayStatus = "active" | "pending_payment" | "paid" | "cancelled" | "lost_ticket";
 
 export type ParkingLot = { id: string; businessId: string; name: string; code: string; capacity: number; active: boolean };
-export type Profile = { id: string; fullName: string; role: UserRole; allowedLotIds: string[]; permissionCodes: string[] };
+export type Profile = { id: string; fullName: string; email?: string; role: UserRole; allowedLotIds: string[]; permissionCodes: string[] };
 export type VehicleType = { id: string; businessId: string; name: string; key: string; description?: string; active: boolean };
 export type RatePlan = { id: string; lotId: string; vehicleTypeId?: string; name: string; pricingMode: "fraction" | "free_time"; flatPrice: number | null; fractionMinutes: 15 | 30 | 45 | 60; price: number; graceMinutes: number; dailyMax: number | null; lostTicketFee: number };
 export type ParkingStay = {
