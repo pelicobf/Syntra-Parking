@@ -2,6 +2,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { calculateFee, displayPlate, makeStay } from "@/app/lib/parking";
 import { supabase } from "@/app/lib/supabase";
+import { assertOperationAllowed, assertOpenShift } from "@/app/lib/operation-rules";
 import type { CashCut, CashRegister, ParkingLot, ParkingStay, Payment, Profile, RatePlan, Shift, VehicleType } from "@/app/types/parking";
 
 const now = Date.now();
@@ -28,7 +29,7 @@ export function useParkingStore(){
   const [businessName,setBusinessName]=useState("Empresa");
   const [businessSubscription,setBusinessSubscription]=useState<BusinessSubscription>({planType:"demo",expiresAt:null,price:0});
   const [stays,setStays]=useState(fallbackStays),[payments,setPayments]=useState<Payment[]>([]),[rate,setRate]=useState(fallbackRates[0]),[rates,setRates]=useState<RatePlan[]>(fallbackRates),[vehicleTypes,setVehicleTypes]=useState<VehicleType[]>(fallbackVehicleTypes),[shift,setShift]=useState(fallbackShift),[cashRegisters,setCashRegisters]=useState<CashRegister[]>(fallbackRegisters),[cashCuts,setCashCuts]=useState<CashCut[]>([]);
-  const [source,setSource]=useState<"loading"|"supabase"|"fallback">("loading"),[syncError,setSyncError]=useState("");
+  const [source,setSource]=useState<"loading"|"supabase"|"offline"|"fallback">("loading"),[syncError,setSyncError]=useState("");
   const [authState,setAuthState]=useState<"checking"|"authenticated"|"unauthenticated"|"demo">("checking"),[staff,setStaff]=useState<StaffRecord[]>([]);
   const [platformBusinesses,setPlatformBusinesses]=useState<PlatformBusiness[]>([]),[platformLots,setPlatformLots]=useState<ParkingLot[]>([]),[platformSubscriptionPayments,setPlatformSubscriptionPayments]=useState<PlatformSubscriptionPayment[]>([]),[selectedBusinessId,setSelectedBusinessId]=useState("");
   const remote=useRef<RemoteContext>(null);
@@ -37,6 +38,7 @@ export function useParkingStore(){
   const realtimeReloading=useRef(false);
 
   useEffect(()=>{void loadRemote();},[]);
+  useEffect(()=>{const offline=()=>{if(authState==="authenticated"){setSource("offline");setSyncError("Sin conexión. Los datos visibles pueden estar desactualizados y la operación está bloqueada.")}};const online=()=>{if(authState==="authenticated")void loadRemote(undefined,true)};window.addEventListener("offline",offline);window.addEventListener("online",online);return()=>{window.removeEventListener("offline",offline);window.removeEventListener("online",online)}},[authState]);
   useEffect(()=>{if(!supabase||authState!=="authenticated")return;void supabase.auth.getUser().then(({data})=>{if(data.user?.email)setProfile(current=>({...current,email:data.user!.email}))})},[authState]);
   useEffect(()=>{if(!supabase||authState!=="authenticated"||profile.role!=="super_admin"||selectedBusinessId||!platformBusinesses.length||commercialLoaded.current)return;commercialLoaded.current=true;void Promise.all([supabase.from("parking_businesses").select("id,plan_price,plan_expires_at"),supabase.from("parking_subscription_payments").select("id,business_id,plan_type,amount,period_start,period_end,paid_at,payment_method,reference,notes").order("paid_at",{ascending:false})]).then(([businessResult,paymentResult])=>{if(businessResult.error||paymentResult.error){commercialLoaded.current=false;setSyncError(businessResult.error?.message??paymentResult.error?.message??"");return}const commercial=new Map((businessResult.data??[]).map((row:any)=>[String(row.id),row]));setPlatformBusinesses(value=>value.map(item=>{const row=commercial.get(item.id);return row?{...item,planPrice:Number(row.plan_price??0),planExpiresAt:row.plan_expires_at?String(row.plan_expires_at):item.planExpiresAt}:item}));setPlatformSubscriptionPayments((paymentResult.data??[]).map((row:any)=>({id:String(row.id),businessId:String(row.business_id),planType:row.plan_type==="annual"?"annual":"monthly",amount:Number(row.amount),periodStart:String(row.period_start),periodEnd:String(row.period_end),paidAt:String(row.paid_at),paymentMethod:String(row.payment_method),reference:row.reference?String(row.reference):null,notes:row.notes?String(row.notes):null})))})},[authState,profile.role,selectedBusinessId,platformBusinesses.length]);
   useEffect(()=>{if(source==="supabase"&&remote.current&&lotId)void refreshShiftForLot(lotId);},[lotId,source]);
@@ -131,7 +133,7 @@ export function useParkingStore(){
       if(shiftRows?.[0]&&String(shiftRows[0].lot_id)===selected)setShift({id:String(shiftRows[0].id),lotId:String(shiftRows[0].lot_id),cashRegisterId:shiftRows[0].cash_register_id?String(shiftRows[0].cash_register_id):undefined,openedAt:String(shiftRows[0].opened_at),openedBy:effectiveName,openingCash:Number(shiftRows[0].opening_cash),status:"open"});else setShift(closedShift(selected));
       if(platformAdmin)setSelectedBusinessId(businessId);
       setSource("supabase");setAuthState("authenticated");setSyncError("");
-    }catch(error){console.warn("ParkFlow fallback:",error);setSyncError(error instanceof Error?error.message:"No fue posible consultar Supabase");if(!silent){remote.current=null;setSource("fallback");setAuthState("unauthenticated");}}
+    }catch(error){console.warn("ParkFlow connection error:",error);setSyncError("Sin conexión. Los datos visibles pueden estar desactualizados y ninguna operación se guardará.");if(authState==="authenticated"||remote.current){setSource("offline");setAuthState("authenticated");}else if(!silent){remote.current=null;setSource("fallback");setAuthState("unauthenticated");}}
   }
 
   const active=useMemo(()=>stays.filter(s=>s.lotId===lotId&&(s.status==="active"||s.status==="pending_payment")),[stays,lotId]);
@@ -139,6 +141,7 @@ export function useParkingStore(){
   const currentRate=rate.lotId===lotId?rate:{...rate,lotId};
   function rateForVehicleType(vehicleTypeId?:string){return rates.find(r=>r.lotId===lotId&&r.vehicleTypeId===vehicleTypeId)??rates.find(r=>r.lotId===lotId)??currentRate}
   async function registerEntry(input:EntryInput|string){
+    assertOperationAllowed(authState,source);
     const value=typeof input==="string"?{plate:input}:input; const plate=displayPlate(value.plate);const selectedTypeId=value.vehicleTypeId??vehicleTypes[0]?.id;const selectedRate=rateForVehicleType(selectedTypeId);
     if(remote.current&&supabase){
       const ctx=remote.current;
@@ -152,13 +155,14 @@ export function useParkingStore(){
     const stay={...makeStay(plate,lotId,stays.length),make:value.make||"Sin identificar",model:value.model||"Vehículo",color:value.color||"—",vehicleTypeId:selectedTypeId};setStays(v=>[stay,...v]);return stay;
   }
   async function charge(stay:ParkingStay,method:Payment["method"]){
-    if(shift.status!=="open"||shift.lotId!==stay.lotId)throw new Error("No hay una caja abierta en esta sucursal. Abre un turno antes de cobrar.");
+    assertOperationAllowed(authState,source);assertOpenShift(shift,stay.lotId);
     const amount=calculateFee(stay.enteredAt,rateForVehicleType(stay.vehicleTypeId));const paidAt=new Date().toISOString();
-    if(remote.current&&supabase){const ctx=remote.current;if(!shift.id)throw new Error("La caja abierta no es válida. Actualiza la pantalla e inténtalo nuevamente.");const {data:payment,error}=await supabase.from("parking_payments").insert({business_id:ctx.businessId,lot_id:stay.lotId,stay_id:stay.id,shift_id:shift.id,method,amount,received_by:ctx.userId}).select("id,paid_at").single();if(error)throw error;const {error:updateError}=await supabase.from("parking_stays").update({status:"paid",exited_at:paidAt,amount_due:amount,closed_by:ctx.userId}).eq("id",stay.id);if(updateError)throw updateError;setPayments(v=>[{id:String(payment.id),stayId:stay.id,shiftId:shift.id,amount,method,paidAt:String(payment.paid_at)},...v]);}
+    if(remote.current&&supabase){if(!shift.id)throw new Error("La caja abierta no es válida. Actualiza la pantalla e inténtalo nuevamente.");const {data,error}=await supabase.rpc("checkout_parking_stay",{p_stay_id:stay.id,p_shift_id:shift.id,p_method:method});if(error)throw error;const response=Array.isArray(data)?data[0]:data;if(!response)throw new Error("No fue posible recuperar el cobro procesado");const payment:Payment={id:String(response.payment_id),stayId:String(response.stay_id),shiftId:response.shift_id?String(response.shift_id):undefined,amount:Number(response.amount),method:response.method,paidAt:String(response.paid_at)};const exitedAt=String(response.exited_at);setPayments(v=>v.some(item=>item.id===payment.id)?v:[payment,...v]);setStays(v=>v.map(s=>s.id===stay.id?{...s,status:"paid",exitedAt,amountDue:payment.amount}:s));return payment.amount;}
     else setPayments(v=>[{id:crypto.randomUUID(),stayId:stay.id,shiftId:shift.id,amount,method,paidAt},...v]);
     setStays(v=>v.map(s=>s.id===stay.id?{...s,status:"paid",exitedAt:paidAt,amountDue:amount}:s));return amount;
   }
   async function openShift(input:{registerId?:string;registerName:string;openingCash:number}){
+    assertOperationAllowed(authState,source);
     if(shift.status==="open"&&shift.lotId===lotId)throw new Error("Ya existe una caja abierta en esta sucursal");
     const openedAt=new Date().toISOString();
     if(remote.current&&supabase){
@@ -174,19 +178,22 @@ export function useParkingStore(){
     const next:Shift={id:crypto.randomUUID(),lotId,cashRegisterId:input.registerId??cashRegisters.find(r=>r.lotId===lotId)?.id,openedAt,openedBy:profile.fullName,openingCash:input.openingCash,status:"open"};setShift(next);return next;
   }
   async function createCashRegister(input:{name:string}){
+    assertOperationAllowed(authState,source);
     const name=input.name.trim();if(!name)throw new Error("Captura el nombre de la caja");
     if(remote.current&&supabase){const baseCode=name.normalize("NFD").replace(/[\u0300-\u036f]/g,"").toUpperCase().replace(/[^A-Z0-9]+/g,"-").replace(/^-|-$/g,"").slice(0,10)||"CAJA";const code=`${baseCode}-${crypto.randomUUID().slice(0,4).toUpperCase()}`;const {data,error}=await supabase.from("parking_cash_registers").insert({business_id:remote.current.businessId,lot_id:lotId,name,code,active:true}).select("id,business_id,lot_id,name,code,active").single();if(error)throw error;const row:CashRegister={id:String(data.id),businessId:String(data.business_id),lotId:String(data.lot_id),name:String(data.name),code:String(data.code),active:Boolean(data.active)};setCashRegisters(v=>[...v,row].sort((a,b)=>a.name.localeCompare(b.name)));return row}
     const row:CashRegister={id:crypto.randomUUID(),businessId:lot.businessId,lotId,name,code:"DEMO",active:true};setCashRegisters(v=>[...v,row]);return row;
   }
   async function closeShift(input:{countedCash:number;expectedCash:number;notes?:string}){
+    assertOperationAllowed(authState,source);
     if(shift.status!=="open"||shift.lotId!==lotId)throw new Error("No hay una caja abierta para cerrar");
     const closedAt=new Date().toISOString();
     if(remote.current&&supabase){const {error}=await supabase.from("parking_shifts").update({closed_at:closedAt,closed_by:remote.current.userId,counted_cash:input.countedCash,expected_cash:input.expectedCash,notes:input.notes||null}).eq("id",shift.id).is("closed_at",null);if(error)throw error}
     setCashCuts(v=>[{id:shift.id,lotId:shift.lotId,cashRegisterId:shift.cashRegisterId,openedAt:shift.openedAt,closedAt,openedBy:shift.openedBy,closedBy:profile.fullName,openingCash:shift.openingCash,expectedCash:input.expectedCash,countedCash:input.countedCash,notes:input.notes},...v]);
     setShift({...shift,status:"closed"});
   }
-  async function saveRate(next:RatePlan){setRate(next);setRates(v=>v.map(r=>r.id===next.id?next:r));if(remote.current&&supabase){const {error}=await supabase.from("parking_rate_plans").update({pricing_mode:next.pricingMode,flat_price:next.pricingMode==="free_time"?next.flatPrice:null,fraction_minutes:next.fractionMinutes,price_per_fraction:next.price,grace_minutes:next.graceMinutes,daily_max:next.dailyMax,lost_ticket_fee:next.lostTicketFee}).eq("id",next.id);if(error)throw error;}}
+  async function saveRate(next:RatePlan){assertOperationAllowed(authState,source);setRate(next);setRates(v=>v.map(r=>r.id===next.id?next:r));if(remote.current&&supabase){const {error}=await supabase.from("parking_rate_plans").update({pricing_mode:next.pricingMode,flat_price:next.pricingMode==="free_time"?next.flatPrice:null,fraction_minutes:next.fractionMinutes,price_per_fraction:next.price,grace_minutes:next.graceMinutes,daily_max:next.dailyMax,lost_ticket_fee:next.lostTicketFee}).eq("id",next.id);if(error)throw error;}}
   async function createVehicleType(input:{name:string;description?:string;fractionMinutes:15|30|45|60;price:number}){
+    assertOperationAllowed(authState,source);
     const name=input.name.trim(),key=name.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g,"").replace(/[^a-z0-9]+/g,"-").replace(/^-|-$/g,"");if(!name||!key)throw new Error("Captura el nombre del tipo de unidad");
     if(remote.current&&supabase){const ctx=remote.current;const {data:typeRow,error:typeError}=await supabase.from("parking_vehicle_types").insert({business_id:ctx.businessId,name,key,description:input.description||null,active:true}).select("id,business_id,name,key,description,active").single();if(typeError)throw typeError;const {data:rateRow,error:rateError}=await supabase.from("parking_rate_plans").insert({business_id:ctx.businessId,lot_id:lotId,vehicle_type_id:typeRow.id,name:`Tarifa ${name.toLowerCase()}`,fraction_minutes:input.fractionMinutes,price_per_fraction:input.price,grace_minutes:0,lost_ticket_fee:0,active:true}).select("*").single();if(rateError){await supabase.from("parking_vehicle_types").delete().eq("id",typeRow.id);throw rateError}const type:VehicleType={id:String(typeRow.id),businessId:String(typeRow.business_id),name:String(typeRow.name),key:String(typeRow.key),description:typeRow.description?String(typeRow.description):undefined,active:Boolean(typeRow.active)},newRate=mapRate(rateRow);setVehicleTypes(v=>[...v,type]);setRates(v=>[...v,newRate]);return type}
     const type:VehicleType={id:crypto.randomUUID(),businessId:lot.businessId,name,key,description:input.description,active:true},newRate:RatePlan={...fallbackRate,id:crypto.randomUUID(),lotId,vehicleTypeId:type.id,name:`Tarifa ${name.toLowerCase()}`,fractionMinutes:input.fractionMinutes,price:input.price};setVehicleTypes(v=>[...v,type]);setRates(v=>[...v,newRate]);return type;
