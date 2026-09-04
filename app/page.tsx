@@ -1,357 +1,3199 @@
+
+
+
+
 "use client";
-import { FormEvent, KeyboardEvent, useEffect, useRef, useState } from "react";
-import { AlertTriangle, ArrowRightLeft, Barcode, BarChart3, Bell, BookOpen, Building2, CalendarRange, CarFront, CheckCircle2, ChevronLeft, ChevronRight, CircleDollarSign, Clock3, Copy, CreditCard, KeyRound, LayoutDashboard, LogOut, Mail, ParkingCircle, Pencil, Plus, Printer, RotateCcw, ScanLine, Search, Settings2, ShieldCheck, TicketCheck, Trash2, Truck, UserPlus, Users, WalletCards, type LucideIcon } from "lucide-react";
+
+import {
+  FormEvent,
+  KeyboardEvent,
+  useEffect,
+  useRef,
+  useState,
+} from "react";
+
+import {
+  AlertTriangle,
+  ArrowRightLeft,
+  Bell,
+  Building2,
+  CarFront,
+  CheckCircle2,
+  ChevronRight,
+  CircleDollarSign,
+  Clock3,
+  LayoutDashboard,
+  LogOut,
+  ParkingCircle,
+  Plus,
+  ScanLine,
+  ShieldCheck,
+  WalletCards,
+} from "lucide-react";
+
+import type { SignInResult as SyntraSignInResult } from "@syntra/login";
+
 import { TicketCodes } from "@/app/components/codes";
-import { LoginScreen as SyntraLogin, type SignInResult as SyntraSignInResult } from "@syntra/login";
-import { BrowserMultiFormatReader, type IScannerControls } from "@zxing/browser";
-import { displayPlate, minutesSince } from "@/app/lib/parking";
+
+/* =========================================================
+   COMPONENTES COMUNES
+========================================================= */
+
+import { Modal } from "@/app/components/common/Modal";
+import { ModalHeader } from "@/app/components/common/ModalHeader";
+import { Stat } from "@/app/components/common/Stat";
+
+/* =========================================================
+   LAYOUT
+========================================================= */
+
+import { AppShell } from "@/app/components/layout/AppShell";
+import { Brand } from "@/app/components/layout/Brand";
+
+/* =========================================================
+   PARKING
+========================================================= */
+
+import { OperationSummary } from "@/app/components/parking/OperationSummary";
+import { StayList } from "@/app/components/parking/StayList";
+
+/* =========================================================
+   DASHBOARD
+========================================================= */
+
+import { MosaicModuleSection } from "@/app/components/dashboard/MosaicModuleSection";
+
+/* =========================================================
+   SCANNER
+========================================================= */
+
+import { CameraScanner } from "@/app/components/scanner/CameraScanner";
+/* =========================================================
+   REPORTES
+========================================================= */
+
+import { CashCuts } from "@/app/components/reports/CashCuts";
+import { Reports } from "@/app/components/reports/Reports";
+
+/* =========================================================
+   PERSONAL
+========================================================= */
+
+import { Staff } from "@/app/components/staff/Staff";
+
+/* =========================================================
+   CONFIGURACIÓN
+========================================================= */
+
+import { Settings } from "@/app/components/settings/Settings";
+
+/* =========================================================
+   PLATAFORMA
+========================================================= */
+
+import { PlatformBusinessDashboard } from "@/app/components/platform/PlatformBusinessDashboard";
+
+/* =========================================================
+   AUTH
+========================================================= */
+
+import { LoginScreen } from "@/app/components/auth/LoginScreen";
+
+/* =========================================================
+   CONFIG
+========================================================= */
+
+import { nav } from "@/app/config/navigation";
+import { getRoleLabel } from "@/app/config/roles";
+
+/* =========================================================
+   HOOKS
+========================================================= */
+
 import { useParkingStore } from "@/app/hooks/use-parking-store";
-import type { AppModule, CashCut, ParkingStay, Payment } from "@/app/types/parking";
+import { useParkingPermissions } from "@/app/hooks/useParkingPermissions";
 
-const currency=new Intl.NumberFormat("es-MX",{style:"currency",currency:"MXN",maximumFractionDigits:0});
-const clock=new Intl.DateTimeFormat("es-MX",{hour:"2-digit",minute:"2-digit",hour12:false,timeZone:"America/Mexico_City"});
-const nav:{id:AppModule;label:string;icon:LucideIcon;group?:string}[]=[
-  {id:"entries",label:"Entradas y salidas",icon:ArrowRightLeft},
-  {id:"shifts",label:"Cajas",icon:WalletCards,group:"GESTIÓN"},{id:"cashCuts",label:"Cortes de caja",icon:CalendarRange},{id:"reports",label:"Reportes",icon:BarChart3},{id:"staff",label:"Personal",icon:Users},
-  {id:"settings",label:"Configuración",icon:Settings2,group:"ADMINISTRACIÓN"},
-];
-const modulePermissions:Partial<Record<AppModule,string>>={dashboard:"dashboard.view",entries:"stays.view",vehicles:"stays.view",shifts:"shifts.view",cashCuts:"cash_cuts.view",reports:"reports.view",staff:"staff.view",settings:"settings.view"};
-const rolePermissionDefaults:Record<string,string[]>={admin:["dashboard.view","stays.view","stays.create","stays.checkout","payments.view","payments.create","shifts.view","shifts.manage","cash_cuts.view","reports.view","reports.export","staff.view","staff.manage","settings.view","rates.manage","lots.manage","devices.manage"],cashier:["dashboard.view","stays.view","stays.create","stays.checkout","payments.view","payments.create","shifts.view","shifts.manage","cash_cuts.view","reports.view"],operator:["stays.view","stays.create","stays.checkout","shifts.view"],viewer:["dashboard.view","stays.view","shifts.view","cash_cuts.view","reports.view"]};
-const accessModules=[{id:"dashboard",label:"Resumen",description:"Indicadores generales",view:"dashboard.view",manage:[]},{id:"entries",label:"Entradas y salidas",description:"Vehículos, boletos y operación",view:"stays.view",manage:["stays.create","stays.checkout","payments.create"]},{id:"shifts",label:"Cajas",description:"Puntos de cobro y turnos",view:"shifts.view",manage:["shifts.manage"]},{id:"cashCuts",label:"Cortes de caja",description:"Historial de cierres",view:"cash_cuts.view",manage:[]},{id:"reports",label:"Reportes",description:"Indicadores e ingresos",view:"reports.view",manage:["reports.export"]},{id:"staff",label:"Personal",description:"Usuarios y permisos",view:"staff.view",manage:["staff.manage"]},{id:"settings",label:"Configuración",description:"Tarifas y dispositivos",view:"settings.view",manage:["rates.manage","lots.manage","devices.manage"]}] as const;
-const roleOptions=[{id:"admin",label:"Administrador",description:"Control operativo, personal y configuración."},{id:"cashier",label:"Cajero",description:"Entradas, salidas, cobros y cajas."},{id:"operator",label:"Operador",description:"Accesos y consulta de cajas."},{id:"viewer",label:"Consulta",description:"Información sin acciones operativas."}];
+/* =========================================================
+   LIB
+========================================================= */
 
-function duration(iso:string){const mins=minutesSince(iso);return `${Math.floor(mins/60)?`${Math.floor(mins/60)} h `:""}${mins%60} min`;}
-function Brand(){return <div className="brand"><img src="/syntra/logo-wordmark-dark.png" alt="Syntra Software"/><small>PARKFLOW</small></div>}
-function Stat({label,value,hint,tone,icon:Icon}:{label:string;value:string;hint:string;tone:string;icon:LucideIcon}){return <article className="stat"><span className={`stat-icon ${tone}`}><Icon size={19}/></span><div><p>{label}</p><strong>{value}</strong><small>{hint}</small></div></article>}
+import { currency, clock } from "@/app/lib/formatters";
+import { displayPlate, minutesSince } from "@/app/lib/parking";
 
-export default function Home(){
-  const store=useParkingStore(); const [module,setModule]=useState<AppModule>("dashboard"); const [query,setQuery]=useState(""); const [modal,setModal]=useState<"entry"|"checkout"|"camera"|"ticket"|"cashRegister"|"openShift"|"closeShift"|"login"|null>(null);
-  const [plate,setPlate]=useState(""); const [make,setMake]=useState(""); const [model,setModel]=useState(""); const [color,setColor]=useState(""); const [vehicleTypeId,setVehicleTypeId]=useState(""); const [selected,setSelected]=useState<ParkingStay|null>(null); const [method,setMethod]=useState<Payment["method"]>("cash"); const [toast,setToast]=useState(""); const [saving,setSaving]=useState(false);
-  const [registerName,setRegisterName]=useState("Caja principal"),[selectedRegisterId,setSelectedRegisterId]=useState(""),[openingCash,setOpeningCash]=useState(0),[countedCash,setCountedCash]=useState(0),[shiftNotes,setShiftNotes]=useState("");
-  const [authError,setAuthError]=useState("");
-  const [loginPending,setLoginPending]=useState(false);
-  const [hydrated,setHydrated]=useState(false);
-  const [sidebarCollapsed,setSidebarCollapsed]=useState(false);
-  const [mobileSidebarOpen,setMobileSidebarOpen]=useState(false);
-  const [navigationMode,setNavigationMode]=useState<"sidebar"|"mosaic">("mosaic");
-  const [mosaicDashboardOpen,setMosaicDashboardOpen]=useState(false);
-  const isSuperAdmin=store.profile.role==="super_admin";
-  const roleLabel:Record<string,string>={super_admin:"Superadministrador",owner:"Propietario",admin:"Administrador",cashier:"Cajero",operator:"Operador",viewer:"Consulta"};
-  const hasPermission=(code:string)=>store.profile.role==="super_admin"||store.profile.role==="owner"||store.profile.permissionCodes.includes("*")||store.profile.permissionCodes.includes(code);
-  const canViewModule=(id:AppModule)=>!modulePermissions[id]||hasPermission(modulePermissions[id]!);
-  const canAccessLot=(id:string)=>isSuperAdmin||store.profile.allowedLotIds.includes(id);
-  const scanInputRef=useRef<HTMLInputElement>(null);
-  const modalRef=useRef(modal);
-  useEffect(()=>{modalRef.current=modal},[modal]);
-  useEffect(()=>{const saved=window.localStorage.getItem("parkflow-navigation-mode");if(saved==="sidebar"){setNavigationMode(saved);setModule("entries")}else if(saved==="mosaic")setNavigationMode(saved);setHydrated(true)},[]);
-  function changeNavigationMode(mode:"sidebar"|"mosaic"){setNavigationMode(mode);setMobileSidebarOpen(false);setMosaicDashboardOpen(false);window.localStorage.setItem("parkflow-navigation-mode",mode);setModule(mode==="mosaic"?"dashboard":"entries");notify(mode==="mosaic"?"Inicio en mosaico activado":"Menú lateral activado")}
-  function openMosaicModule(next:AppModule){setModule(next);setMosaicDashboardOpen(next==="dashboard")}
-  useEffect(()=>{if((module==="entries"||module==="vehicles")&&!modal){const id=window.setTimeout(()=>scanInputRef.current?.focus(),60);return()=>window.clearTimeout(id)}},[module,modal]);
-  useEffect(()=>{if((module==="entries"||module==="vehicles")&&store.authState==="authenticated"&&hasPermission("shifts.manage")&&store.shift.status!=="open"&&!modal){const register=store.cashRegisters.find(r=>r.lotId===store.lotId);setSelectedRegisterId(register?.id??"");setRegisterName(register?.name??"Caja principal");setModal("openShift")}},[module,store.authState,store.shift.status,store.lotId,store.profile.permissionCodes]);
-  useEffect(()=>{if(store.authState!=="authenticated"||canViewModule(module))return;setModule(nav.find(item=>canViewModule(item.id))?.id??"entries")},[store.authState,store.profile.permissionCodes,module]);
-  const filtered=store.active.filter(s=>`${s.plate} ${s.make} ${s.model} ${s.folio} ${s.barcodeValue}`.toLowerCase().includes(query.toLowerCase()));
-  const activeFiltered=store.active.filter(s=>`${s.plate} ${s.make} ${s.model} ${s.folio}`.toLowerCase().includes(query.toLowerCase()));
-  const visibleStays=filtered;
-  const pendingCount=store.active.filter(s=>s.status==="pending_payment").length;
-  const shiftPayments=store.payments.filter(p=>store.source==="fallback"?new Date(p.paidAt).toDateString()===new Date().toDateString():p.shiftId===store.shift.id);
-  const revenue=shiftPayments.reduce((a,p)=>a+p.amount,store.source==="fallback"?8420:0);
-  const cashRevenue=shiftPayments.filter(p=>p.method==="cash").reduce((a,p)=>a+p.amount,store.source==="fallback"?8420:0);
-  const occupancy=Math.round(store.active.length/store.lot.capacity*100); const available=store.lot.capacity-store.active.length;
-  const currentDate=new Intl.DateTimeFormat("es-MX",{weekday:"long",day:"numeric",month:"long"}).format(new Date());
-  const subscriptionDays=store.businessSubscription.expiresAt?Math.ceil((new Date(store.businessSubscription.expiresAt).getTime()-Date.now())/86400000):null;
-  const subscriptionLabel=store.businessSubscription.planType==="annual"?"Plan anual":store.businessSubscription.planType==="monthly"?"Plan mensual":"Demostración";
-  const subscriptionExpiry=subscriptionDays===null?"Sin vencimiento":subscriptionDays<0?`Vencido hace ${Math.abs(subscriptionDays)} día${Math.abs(subscriptionDays)===1?"":"s"}`:subscriptionDays===0?"Vence hoy":`Vence en ${subscriptionDays} día${subscriptionDays===1?"":"s"}`;
-  const showSubscriptionNotice=store.businessSubscription.planType==="demo"||subscriptionDays!==null&&subscriptionDays<=8;
-  function notify(v:string){setToast(v);setTimeout(()=>setToast(""),2600)}
-  async function submitEntry(e:FormEvent){e.preventDefault();if(!hasPermission("stays.create")){notify("Tu acceso es únicamente de consulta");return}if(!plate.trim())return;setSaving(true);try{const stay=await store.registerEntry({plate,make,model,color,vehicleTypeId:vehicleTypeId||store.vehicleTypes[0]?.id});setSelected(stay);setPlate("");setMake("");setModel("");setColor("");setVehicleTypeId("");setModal("ticket")}catch(error){notify(error instanceof Error?error.message:"No fue posible registrar la entrada")}finally{setSaving(false)}}
-  function openCheckout(stay?:ParkingStay){if(!hasPermission("stays.checkout")||!hasPermission("payments.create")){notify("Tu acceso a Entradas y salidas es únicamente de consulta");return}if(store.shift.status!=="open"||store.shift.lotId!==store.lotId){notify("Debes abrir una caja antes de registrar cobros");setModule("shifts");if(hasPermission("shifts.manage"))setModal("openShift");return}setSelected(stay??store.active.find(s=>s.status==="pending_payment")??store.active[0]??null);setModal("checkout")}
-  function findScannedStay(value:string){const code=value.trim().toLowerCase();return store.active.find(s=>[s.barcodeValue,s.qrToken,s.folio,s.plate].some(candidate=>candidate.toLowerCase()===code)||s.qrToken.toLowerCase().endsWith(code))}
-  function processScan(value:string){const stay=findScannedStay(value);if(stay){setQuery("");openCheckout(stay)}else notify("No encontramos un boleto activo con ese código")}
-  function handleScanKey(e:KeyboardEvent<HTMLInputElement>){if(e.key!=="Enter")return;e.preventDefault();if(query.trim())processScan(query)}
-  async function pay(){if(!selected)return;setSaving(true);try{const amount=await store.charge(selected,method);setModal(null);notify(`Salida registrada · ${currency.format(amount)}`)}catch(error){notify(error instanceof Error?error.message:"No fue posible registrar el cobro")}finally{setSaving(false)}}
-  async function submitOpenShift(e:FormEvent){e.preventDefault();setSaving(true);try{const register=store.cashRegisters.find(r=>r.id===selectedRegisterId)??store.cashRegisters.find(r=>r.lotId===store.lotId);await store.openShift({registerId:register?.id,registerName:register?.name??registerName,openingCash});setModal(null);notify("Caja abierta correctamente")}catch(error){notify(error instanceof Error?error.message:"No fue posible abrir la caja")}finally{setSaving(false)}}
-  async function submitCashRegister(e:FormEvent){e.preventDefault();setSaving(true);try{await store.createCashRegister({name:registerName});setModal(null);notify("Nueva caja creada correctamente")}catch(error){notify(error instanceof Error?error.message:"No fue posible crear la caja")}finally{setSaving(false)}}
-  async function submitCloseShift(e:FormEvent){e.preventDefault();setSaving(true);try{await store.closeShift({countedCash,expectedCash:cashRevenue+store.shift.openingCash,notes:shiftNotes});setModal(null);setShiftNotes("");notify("Turno cerrado correctamente")}catch(error){notify(error instanceof Error?error.message:"No fue posible cerrar el turno")}finally{setSaving(false)}}
-  async function login(identifier:string,password:string):Promise<SyntraSignInResult>{setAuthError("");setLoginPending(true);try{await store.signIn(identifier,password);setModal(null);notify("Supabase conectado correctamente");return{error:null}}catch(error){const message=error instanceof Error?error.message:"No fue posible iniciar sesión";setAuthError(message);return{error:message}}finally{setLoginPending(false)}}
-  async function registerBusiness(input:{name:string;slug:string;lotName:string;lotCode:string;capacity:number;ownerName:string;ownerEmail:string;ownerPassword:string}){setSaving(true);setAuthError("");try{await store.registerBusiness(input);notify("Empresa creada correctamente")}catch(error){const message=error instanceof Error?error.message:"No fue posible crear la empresa";setAuthError(message);throw error}finally{setSaving(false)}}
-  const titles:Record<AppModule,[string,string]>={dashboard:["Resumen","Panorama operativo en tiempo real"],entries:["Entradas y salidas","Control de accesos, vehículos y cobros"],vehicles:["Entradas y salidas","Control de accesos, vehículos y cobros"],shifts:["Cajas","Administración de puntos de cobro"],cashCuts:["Cortes de caja","Historial de cierres por usuario"],reports:["Reportes","Indicadores de operación e ingresos"],staff:["Personal","Usuarios, roles y sucursales"],settings:["Configuración","Tarifas, espacios y dispositivos"]};
-  if(!hydrated)return null;
-  if(store.authState==="checking"&&!loginPending&&!saving)return null;
-  if(store.authState!=="authenticated")return <LoginScreen error={authError||store.syncError} saving={saving} onLogin={login} onRegister={registerBusiness}/>;
-  if(store.profile.role==="super_admin"&&!store.selectedBusinessId)return <PlatformBusinessDashboard store={store}/>;
-  return <div className={`shell nav-mode-${navigationMode} ${sidebarCollapsed?"sidebar-is-collapsed":""} ${mobileSidebarOpen?"mobile-sidebar-open":""}`}>
-    {mobileSidebarOpen&&<button className="mobile-sidebar-backdrop" aria-label="Cerrar menú" onClick={()=>setMobileSidebarOpen(false)}/>}<aside className="sidebar"><button className="sidebar-toggle" aria-label={sidebarCollapsed?"Expandir menú":"Contraer menú"} onClick={()=>setSidebarCollapsed(v=>!v)}><ChevronLeft size={14}/></button><Brand/><nav>{nav.filter(item=>canViewModule(item.id)).map(item=>{const Icon=item.icon;return <div key={item.id}>{item.group&&<p>{item.group}</p>}<button className={module===item.id?"active":""} onClick={()=>{setModule(item.id);setMobileSidebarOpen(false)}} title={sidebarCollapsed?item.label:undefined}><span><Icon size={18}/></span><b>{item.label}</b>{item.id==="vehicles"&&<em>{store.active.length}</em>}</button></div>})}</nav><div className="side-profile side-session"><span>{store.profile.fullName.split(" ").map(v=>v[0]).join("").slice(0,2)}</span><div className="session-identity"><b>{store.profile.fullName}</b><em>{store.profile.email||"Usuario autenticado"}</em></div><strong><ShieldCheck size={12}/>{roleLabel[store.profile.role]||store.profile.role}</strong><section><Building2 size={14}/><span><small>EMPRESA ACTIVA</small><b>{store.businessName}</b></span></section><footer className={store.shift.status==="open"?"shift-open":"shift-closed"}><i/>{store.shift.status==="open"?"Caja abierta":"Caja cerrada"}<button aria-label="Cerrar sesión" onClick={()=>void store.signOut()}><LogOut size={15}/> <b>Salir</b></button></footer></div></aside>
-    <main><header className="topbar"><div className="top-title">{navigationMode==="mosaic"?<button className="mosaic-home-button" onClick={()=>{setModule("dashboard");setMosaicDashboardOpen(false)}} aria-label="Volver al inicio" title="Volver al menú de módulos"><LayoutDashboard/><span>Inicio</span></button>:<button className="mobile-brand" onClick={()=>setMobileSidebarOpen(true)}><Brand/></button>}<div><h1>{titles[module][0]}</h1><p>{titles[module][1]}</p></div></div><div className="top-controls syntra-context">{isSuperAdmin&&<button className="platform-return" onClick={()=>void store.leavePlatformBusiness()} title="Regresar a la selección de empresas"><span><LayoutDashboard size={17}/></span><div><small>SUPER ADMINISTRACIÓN</small><b>Volver al panel global</b></div><ChevronRight size={15}/></button>}<div className="business-context"><span><Building2 size={16}/></span><div><small>EMPRESA</small><b>{store.businessName}</b></div></div><label className="branch-context"><span><ParkingCircle size={16}/></span><div><small>SUCURSAL ACTIVA</small><select value={store.lotId} disabled={!store.lots.length} onChange={e=>store.setLotId(e.target.value)}>{!store.lots.length&&<option value="">Sin sucursales registradas</option>}{store.lots.filter(l=>canAccessLot(l.id)).map(l=><option key={l.id} value={l.id}>{l.name}</option>)}</select></div></label><button className="notification-button" aria-label="Notificaciones"><Bell size={18}/>{pendingCount>0&&<em>{pendingCount>9?"9+":pendingCount}</em>}</button><button className={`online sync-button ${store.source}`} title={store.syncError} onClick={()=>store.source==="fallback"&&setModal("login")}><i/>{store.source==="supabase"?"En línea":store.source==="loading"?"Conectando…":store.source==="offline"?"Sin conexión":"Conectar"}</button></div></header>
-      {store.source==="offline"&&<section className="offline-notice" role="alert"><AlertTriangle size={18}/><div><b>Operación bloqueada por falta de internet</b><small>La información mostrada es la última sincronizada. No se registrarán entradas, cobros ni movimientos de caja hasta recuperar la conexión.</small></div></section>}
+/* =========================================================
+   TYPES
+========================================================= */
 
-      {showSubscriptionNotice&&<section className={`subscription-notice ${store.businessSubscription.planType} ${subscriptionDays!==null&&subscriptionDays<0?"expired":""}`}><span>{store.businessSubscription.planType==="demo"?<Clock3/>:<CalendarRange/>}</span><div><b>{subscriptionLabel} · {subscriptionExpiry}</b><small>{store.businessSubscription.planType==="demo"?"Todos tus datos se conservarán al contratar un plan.":subscriptionDays!==null&&subscriptionDays<0?"La vigencia terminó. Contacta al administrador de la plataforma para renovar.":"Tu renovación se aproxima. Considera realizar el pago para mantener el servicio activo."}</small></div></section>}
-      {module==="dashboard"&&navigationMode==="mosaic"&&!mosaicDashboardOpen&&<div className="pos-mosaic-home">
-        <header className="pos-mosaic-header">
-          <div className="pos-mosaic-heading"><span><LayoutDashboard/></span><div><h1>Inicio</h1><p>Elige un módulo para comenzar</p></div></div>
-          <div className="pos-mosaic-context">
-            <div className="pos-context-card"><span><Building2/></span><div><small>EMPRESA</small><b>{store.businessName}</b></div></div>
-            <label className="pos-context-card pos-branch-card"><span><ParkingCircle/></span><div><small>SUCURSAL ACTIVA</small><select value={store.lotId} disabled={!store.lots.length} onChange={e=>store.setLotId(e.target.value)}>{store.lots.filter(l=>canAccessLot(l.id)).map(l=><option key={l.id} value={l.id}>{l.name}</option>)}</select></div></label>
-            <button className="pos-icon-button" aria-label="Notificaciones"><Bell/>{pendingCount>0&&<em>{pendingCount>9?"9+":pendingCount}</em>}</button>
-            <div className="pos-user-card"><span>{store.profile.fullName.split(" ").map(v=>v[0]).join("").slice(0,2)}</span><div><b>{store.profile.fullName}</b><small>{roleLabel[store.profile.role]||store.profile.role}</small></div></div>
-            <button className="pos-icon-button" aria-label="Cerrar sesión" onClick={()=>void store.signOut()}><LogOut/></button>
+import type {
+  AppModule,
+  ParkingStay,
+  Payment,
+} from "@/app/types/parking";
+
+type ModalType =
+  | "entry"
+  | "checkout"
+  | "camera"
+  | "ticket"
+  | "cashRegister"
+  | "openShift"
+  | "closeShift"
+  | "login"
+  | null;
+
+const titles: Record<AppModule, [string, string]> = {
+  dashboard: [
+    "Resumen",
+    "Panorama operativo en tiempo real",
+  ],
+  entries: [
+    "Entradas y salidas",
+    "Control de accesos, vehículos y cobros",
+  ],
+  vehicles: [
+    "Entradas y salidas",
+    "Control de accesos, vehículos y cobros",
+  ],
+  shifts: [
+    "Cajas",
+    "Administración de puntos de cobro",
+  ],
+  cashCuts: [
+    "Cortes de caja",
+    "Historial de cierres por usuario",
+  ],
+  reports: [
+    "Reportes",
+    "Indicadores de operación e ingresos",
+  ],
+  staff: [
+    "Personal",
+    "Usuarios, roles y sucursales",
+  ],
+  settings: [
+    "Configuración",
+    "Tarifas, espacios y dispositivos",
+  ],
+};
+
+function duration(iso: string) {
+  const mins = minutesSince(iso);
+
+  return `${
+    Math.floor(mins / 60)
+      ? `${Math.floor(mins / 60)} h `
+      : ""
+  }${mins % 60} min`;
+}
+
+export default function Home() {
+  const store = useParkingStore();
+
+  const {
+    hasPermission,
+    canViewModule,
+    canAccessLot,
+  } = useParkingPermissions();
+
+  /* =========================================================
+     NAVEGACIÓN
+  ========================================================= */
+
+  const [module, setModule] =
+    useState<AppModule>("dashboard");
+
+  const [navigationMode, setNavigationMode] =
+    useState<"sidebar" | "mosaic">("mosaic");
+
+  const [
+    mosaicDashboardOpen,
+    setMosaicDashboardOpen,
+  ] = useState(false);
+
+  const [
+    sidebarCollapsed,
+    setSidebarCollapsed,
+  ] = useState(false);
+
+  const [
+    mobileSidebarOpen,
+    setMobileSidebarOpen,
+  ] = useState(false);
+
+  /* =========================================================
+     UI
+  ========================================================= */
+
+  const [modal, setModal] =
+    useState<ModalType>(null);
+
+  const [toast, setToast] = useState("");
+
+  const [saving, setSaving] =
+    useState(false);
+
+  const [hydrated, setHydrated] =
+    useState(false);
+
+  /* =========================================================
+     VEHÍCULO
+  ========================================================= */
+
+  const [query, setQuery] = useState("");
+
+  const [plate, setPlate] = useState("");
+  const [make, setMake] = useState("");
+  const [model, setModel] = useState("");
+  const [color, setColor] = useState("");
+
+  const [
+    vehicleTypeId,
+    setVehicleTypeId,
+  ] = useState("");
+
+  const [selected, setSelected] =
+    useState<ParkingStay | null>(null);
+
+  const [method, setMethod] =
+    useState<Payment["method"]>("cash");
+
+  /* =========================================================
+     CAJA
+  ========================================================= */
+
+  const [
+    registerName,
+    setRegisterName,
+  ] = useState("Caja principal");
+
+  const [
+    selectedRegisterId,
+    setSelectedRegisterId,
+  ] = useState("");
+
+  const [
+    openingCash,
+    setOpeningCash,
+  ] = useState(0);
+
+  const [
+    countedCash,
+    setCountedCash,
+  ] = useState(0);
+
+  const [
+    shiftNotes,
+    setShiftNotes,
+  ] = useState("");
+
+  /* =========================================================
+     LOGIN
+  ========================================================= */
+
+  const [authError, setAuthError] =
+    useState("");
+
+  const [
+    loginPending,
+    setLoginPending,
+  ] = useState(false);
+
+  const [syncEmail, setSyncEmail] =
+    useState("");
+
+  const [
+    syncPassword,
+    setSyncPassword,
+  ] = useState("");
+
+  /* =========================================================
+     REFS
+  ========================================================= */
+
+  const scanInputRef =
+    useRef<HTMLInputElement>(null);
+
+  const modalRef =
+    useRef<ModalType>(modal);
+
+  useEffect(() => {
+    modalRef.current = modal;
+  }, [modal]);
+
+  /* =========================================================
+     INICIALIZACIÓN
+  ========================================================= */
+
+  useEffect(() => {
+    const saved =
+      window.localStorage.getItem(
+        "parkflow-navigation-mode",
+      );
+
+    if (saved === "sidebar") {
+      setNavigationMode("sidebar");
+      setModule("entries");
+    } else if (saved === "mosaic") {
+      setNavigationMode("mosaic");
+    }
+
+    setHydrated(true);
+  }, []);
+
+  function notify(message: string) {
+    setToast(message);
+
+    window.setTimeout(() => {
+      setToast("");
+    }, 2600);
+  }
+
+  function changeNavigationMode(
+    mode: "sidebar" | "mosaic",
+  ) {
+    setNavigationMode(mode);
+
+    setMobileSidebarOpen(false);
+    setMosaicDashboardOpen(false);
+
+    window.localStorage.setItem(
+      "parkflow-navigation-mode",
+      mode,
+    );
+
+    setModule(
+      mode === "mosaic"
+        ? "dashboard"
+        : "entries",
+    );
+
+    notify(
+      mode === "mosaic"
+        ? "Inicio en mosaico activado"
+        : "Menú lateral activado",
+    );
+  }
+
+  function openMosaicModule(
+    next: AppModule,
+  ) {
+    setModule(next);
+
+    setMosaicDashboardOpen(
+      next === "dashboard",
+    );
+  }
+
+  /* =========================================================
+     AUTOFOCUS SCANNER
+  ========================================================= */
+
+  useEffect(() => {
+    if (
+      (module === "entries" ||
+        module === "vehicles") &&
+      !modal
+    ) {
+      const id = window.setTimeout(() => {
+        scanInputRef.current?.focus();
+      }, 60);
+
+      return () => {
+        window.clearTimeout(id);
+      };
+    }
+  }, [module, modal]);
+
+  /* =========================================================
+     APERTURA AUTOMÁTICA DE CAJA
+  ========================================================= */
+
+  useEffect(() => {
+    if (
+      (module === "entries" ||
+        module === "vehicles") &&
+      store.authState === "authenticated" &&
+      hasPermission("shifts.manage") &&
+      store.shift.status !== "open" &&
+      !modal
+    ) {
+      const register =
+        store.cashRegisters.find(
+          (item) =>
+            item.lotId === store.lotId,
+        );
+
+      setSelectedRegisterId(
+        register?.id ?? "",
+      );
+
+      setRegisterName(
+        register?.name ??
+          "Caja principal",
+      );
+
+      setModal("openShift");
+    }
+  }, [
+    module,
+    store.authState,
+    store.shift.status,
+    store.lotId,
+    store.profile.permissionCodes,
+  ]);
+
+  /* =========================================================
+     VALIDAR PERMISOS
+  ========================================================= */
+
+  useEffect(() => {
+    if (
+      store.authState !==
+        "authenticated" ||
+      canViewModule(module)
+    ) {
+      return;
+    }
+
+    const nextModule = nav.find(
+      (item) =>
+        canViewModule(item.id),
+    );
+
+    setModule(
+      nextModule?.id ?? "entries",
+    );
+  }, [
+    store.authState,
+    store.profile.permissionCodes,
+    module,
+  ]);
+
+  /* =========================================================
+     DATOS
+  ========================================================= */
+
+  const visibleStays =
+    store.active.filter((stay) =>
+      `${stay.plate} ${stay.make} ${stay.model} ${stay.folio} ${stay.barcodeValue}`
+        .toLowerCase()
+        .includes(
+          query.toLowerCase(),
+        ),
+    );
+
+  const activeFiltered =
+    store.active.filter((stay) =>
+      `${stay.plate} ${stay.make} ${stay.model} ${stay.folio}`
+        .toLowerCase()
+        .includes(
+          query.toLowerCase(),
+        ),
+    );
+
+  const pendingCount =
+    store.active.filter(
+      (stay) =>
+        stay.status ===
+        "pending_payment",
+    ).length;
+
+  const shiftPayments =
+    store.payments.filter(
+      (payment) =>
+        store.source === "fallback"
+          ? new Date(
+              payment.paidAt,
+            ).toDateString() ===
+            new Date().toDateString()
+          : payment.shiftId ===
+            store.shift.id,
+    );
+
+  const revenue =
+    shiftPayments.reduce(
+      (total, payment) =>
+        total + payment.amount,
+      store.source === "fallback"
+        ? 8420
+        : 0,
+    );
+
+  const cashRevenue =
+    shiftPayments
+      .filter(
+        (payment) =>
+          payment.method === "cash",
+      )
+      .reduce(
+        (total, payment) =>
+          total + payment.amount,
+        store.source === "fallback"
+          ? 8420
+          : 0,
+      );
+
+  const occupancy =
+    store.lot.capacity > 0
+      ? Math.round(
+          (store.active.length /
+            store.lot.capacity) *
+            100,
+        )
+      : 0;
+
+  const available =
+    store.lot.capacity -
+    store.active.length;
+
+  const currentDate =
+    new Intl.DateTimeFormat(
+      "es-MX",
+      {
+        weekday: "long",
+        day: "numeric",
+        month: "long",
+      },
+    ).format(new Date());
+
+  /* =========================================================
+     SUSCRIPCIÓN
+  ========================================================= */
+
+  const subscriptionDays =
+    store.businessSubscription.expiresAt
+      ? Math.ceil(
+          (new Date(
+            store.businessSubscription
+              .expiresAt,
+          ).getTime() -
+            Date.now()) /
+            86400000,
+        )
+      : null;
+
+  const subscriptionLabel =
+    store.businessSubscription
+      .planType === "annual"
+      ? "Plan anual"
+      : store.businessSubscription
+          .planType === "monthly"
+      ? "Plan mensual"
+      : "Demostración";
+
+  const subscriptionExpiry =
+    subscriptionDays === null
+      ? "Sin vencimiento"
+      : subscriptionDays < 0
+      ? `Vencido hace ${Math.abs(
+          subscriptionDays,
+        )} día${
+          Math.abs(
+            subscriptionDays,
+          ) === 1
+            ? ""
+            : "s"
+        }`
+      : subscriptionDays === 0
+      ? "Vence hoy"
+      : `Vence en ${subscriptionDays} día${
+          subscriptionDays === 1
+            ? ""
+            : "s"
+        }`;
+
+  const showSubscriptionNotice =
+    store.businessSubscription
+      .planType === "demo" ||
+    (subscriptionDays !== null &&
+      subscriptionDays <= 8);
+
+  /* =========================================================
+     ENTRADA
+  ========================================================= */
+
+  async function submitEntry(
+    e: FormEvent,
+  ) {
+    e.preventDefault();
+
+    if (
+      !hasPermission(
+        "stays.create",
+      )
+    ) {
+      notify(
+        "Tu acceso es únicamente de consulta",
+      );
+
+      return;
+    }
+
+    if (!plate.trim()) {
+      return;
+    }
+
+    setSaving(true);
+
+    try {
+      const stay =
+        await store.registerEntry({
+          plate,
+          make,
+          model,
+          color,
+          vehicleTypeId:
+            vehicleTypeId ||
+            store.vehicleTypes[0]
+              ?.id,
+        });
+
+      setSelected(stay);
+
+      setPlate("");
+      setMake("");
+      setModel("");
+      setColor("");
+      setVehicleTypeId("");
+
+      setModal("ticket");
+    } catch (error) {
+      notify(
+        error instanceof Error
+          ? error.message
+          : "No fue posible registrar la entrada",
+      );
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  /* =========================================================
+     CHECKOUT
+  ========================================================= */
+
+  function openCheckout(
+    stay?: ParkingStay,
+  ) {
+    if (
+      !hasPermission(
+        "stays.checkout",
+      ) ||
+      !hasPermission(
+        "payments.create",
+      )
+    ) {
+      notify(
+        "Tu acceso a Entradas y salidas es únicamente de consulta",
+      );
+
+      return;
+    }
+
+    if (
+      store.shift.status !==
+        "open" ||
+      store.shift.lotId !==
+        store.lotId
+    ) {
+      notify(
+        "Debes abrir una caja antes de registrar cobros",
+      );
+
+      setModule("shifts");
+
+      if (
+        hasPermission(
+          "shifts.manage",
+        )
+      ) {
+        setModal("openShift");
+      }
+
+      return;
+    }
+
+    setSelected(
+      stay ??
+        store.active.find(
+          (item) =>
+            item.status ===
+            "pending_payment",
+        ) ??
+        store.active[0] ??
+        null,
+    );
+
+    setModal("checkout");
+  }
+
+  /* =========================================================
+     SCANNER
+  ========================================================= */
+
+  function findScannedStay(
+    value: string,
+  ) {
+    const code =
+      value
+        .trim()
+        .toLowerCase();
+
+    return store.active.find(
+      (stay) =>
+        [
+          stay.barcodeValue,
+          stay.qrToken,
+          stay.folio,
+          stay.plate,
+        ].some(
+          (candidate) =>
+            candidate.toLowerCase() ===
+            code,
+        ) ||
+        stay.qrToken
+          .toLowerCase()
+          .endsWith(code),
+    );
+  }
+
+  function processScan(
+    value: string,
+  ) {
+    const stay =
+      findScannedStay(value);
+
+    if (stay) {
+      setQuery("");
+      openCheckout(stay);
+    } else {
+      notify(
+        "No encontramos un boleto activo con ese código",
+      );
+    }
+  }
+
+  function handleScanKey(
+    e: KeyboardEvent<HTMLInputElement>,
+  ) {
+    if (e.key !== "Enter") {
+      return;
+    }
+
+    e.preventDefault();
+
+    if (query.trim()) {
+      processScan(query);
+    }
+  }
+
+  /* =========================================================
+     COBRO
+  ========================================================= */
+
+  async function pay() {
+    if (!selected) {
+      return;
+    }
+
+    setSaving(true);
+
+    try {
+      const amount =
+        await store.charge(
+          selected,
+          method,
+        );
+
+      setModal(null);
+
+      notify(
+        `Salida registrada · ${currency.format(
+          amount,
+        )}`,
+      );
+    } catch (error) {
+      notify(
+        error instanceof Error
+          ? error.message
+          : "No fue posible registrar el cobro",
+      );
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  /* =========================================================
+     CAJAS
+  ========================================================= */
+
+  async function submitOpenShift(
+    e: FormEvent,
+  ) {
+    e.preventDefault();
+
+    setSaving(true);
+
+    try {
+      const register =
+        store.cashRegisters.find(
+          (item) =>
+            item.id ===
+            selectedRegisterId,
+        ) ??
+        store.cashRegisters.find(
+          (item) =>
+            item.lotId ===
+            store.lotId,
+        );
+
+      await store.openShift({
+        registerId: register?.id,
+        registerName:
+          register?.name ??
+          registerName,
+        openingCash,
+      });
+
+      setModal(null);
+
+      notify(
+        "Caja abierta correctamente",
+      );
+    } catch (error) {
+      notify(
+        error instanceof Error
+          ? error.message
+          : "No fue posible abrir la caja",
+      );
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function submitCashRegister(
+    e: FormEvent,
+  ) {
+    e.preventDefault();
+
+    setSaving(true);
+
+    try {
+      await store.createCashRegister({
+        name: registerName,
+      });
+
+      setModal(null);
+
+      notify(
+        "Nueva caja creada correctamente",
+      );
+    } catch (error) {
+      notify(
+        error instanceof Error
+          ? error.message
+          : "No fue posible crear la caja",
+      );
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function submitCloseShift(
+    e: FormEvent,
+  ) {
+    e.preventDefault();
+
+    setSaving(true);
+
+    try {
+      await store.closeShift({
+        countedCash,
+        expectedCash:
+          cashRevenue +
+          store.shift.openingCash,
+        notes: shiftNotes,
+      });
+
+      setModal(null);
+      setShiftNotes("");
+
+      notify(
+        "Turno cerrado correctamente",
+      );
+    } catch (error) {
+      notify(
+        error instanceof Error
+          ? error.message
+          : "No fue posible cerrar el turno",
+      );
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  /* =========================================================
+     LOGIN
+  ========================================================= */
+
+  async function login(
+    identifier: string,
+    password: string,
+  ): Promise<SyntraSignInResult> {
+    setAuthError("");
+    setLoginPending(true);
+
+    try {
+      await store.signIn(
+        identifier,
+        password,
+      );
+
+      setModal(null);
+
+      notify(
+        "Supabase conectado correctamente",
+      );
+
+      return {
+        error: null,
+      };
+    } catch (error) {
+      const message =
+        error instanceof Error
+          ? error.message
+          : "No fue posible iniciar sesión";
+
+      setAuthError(message);
+
+      return {
+        error: message,
+      };
+    } finally {
+      setLoginPending(false);
+    }
+  }
+
+  async function submitSyncLogin(
+    e: FormEvent,
+  ) {
+    e.preventDefault();
+
+    await login(
+      syncEmail,
+      syncPassword,
+    );
+  }
+
+  async function registerBusiness(
+    input: {
+      name: string;
+      slug: string;
+      lotName: string;
+      lotCode: string;
+      capacity: number;
+      ownerName: string;
+      ownerEmail: string;
+      ownerPassword: string;
+    },
+  ) {
+    setSaving(true);
+    setAuthError("");
+
+    try {
+      await store.registerBusiness(
+        input,
+      );
+
+      notify(
+        "Empresa creada correctamente",
+      );
+    } catch (error) {
+      const message =
+        error instanceof Error
+          ? error.message
+          : "No fue posible crear la empresa";
+
+      setAuthError(message);
+
+      throw error;
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  /* =========================================================
+     AUTH GUARDS
+  ========================================================= */
+
+  if (!hydrated) {
+    return null;
+  }
+
+  if (
+    store.authState === "checking" &&
+    !loginPending &&
+    !saving
+  ) {
+    return null;
+  }
+
+  if (
+    store.authState !==
+    "authenticated"
+  ) {
+    return (
+      <LoginScreen
+        error={
+          authError ||
+          store.syncError
+        }
+        saving={saving}
+        onLogin={login}
+        onRegister={
+          registerBusiness
+        }
+      />
+    );
+  }
+
+  if (
+    store.profile.role ===
+      "super_admin" &&
+    !store.selectedBusinessId
+  ) {
+    return (
+      <PlatformBusinessDashboard
+        store={store}
+      />
+    );
+  }
+
+  /* =========================================================
+     RENDER
+  ========================================================= */
+
+  return (
+    <>
+      <AppShell
+        module={module}
+        title={titles[module][0]}
+        subtitle={titles[module][1]}
+        navigationMode={
+          navigationMode
+        }
+        sidebarCollapsed={
+          sidebarCollapsed
+        }
+        mobileSidebarOpen={
+          mobileSidebarOpen
+        }
+        pendingCount={
+          pendingCount
+        }
+        onModuleChange={setModule}
+        onToggleSidebar={() =>
+          setSidebarCollapsed(
+            (value) => !value,
+          )
+        }
+        onOpenMobileSidebar={() =>
+          setMobileSidebarOpen(true)
+        }
+        onCloseMobileSidebar={() =>
+          setMobileSidebarOpen(false)
+        }
+        onHome={() => {
+          setModule("dashboard");
+          setMosaicDashboardOpen(
+            false,
+          );
+        }}
+        onScan={() =>
+          setModal("camera")
+        }
+        onOpenLogin={() =>
+          setModal("login")
+        }
+      >
+        {/* OFFLINE */}
+
+        {store.source ===
+          "offline" && (
+          <section
+            className="offline-notice"
+            role="alert"
+          >
+            <AlertTriangle
+              size={18}
+            />
+
+            <div>
+              <b>
+                Operación bloqueada
+                por falta de internet
+              </b>
+
+              <small>
+                La información mostrada
+                es la última
+                sincronizada. No se
+                registrarán entradas,
+                cobros ni movimientos
+                de caja hasta recuperar
+                la conexión.
+              </small>
+            </div>
+          </section>
+        )}
+
+        {/* SUSCRIPCIÓN */}
+
+        {showSubscriptionNotice && (
+          <section
+            className={`subscription-notice ${
+              store
+                .businessSubscription
+                .planType
+            } ${
+              subscriptionDays !==
+                null &&
+              subscriptionDays < 0
+                ? "expired"
+                : ""
+            }`}
+          >
+            <span>
+              {store
+                .businessSubscription
+                .planType ===
+              "demo" ? (
+                <Clock3 />
+              ) : (
+                <ParkingCircle />
+              )}
+            </span>
+
+            <div>
+              <b>
+                {subscriptionLabel} ·{" "}
+                {subscriptionExpiry}
+              </b>
+
+              <small>
+                {store
+                  .businessSubscription
+                  .planType ===
+                "demo"
+                  ? "Todos tus datos se conservarán al contratar un plan."
+                  : subscriptionDays !==
+                      null &&
+                    subscriptionDays <
+                      0
+                  ? "La vigencia terminó. Contacta al administrador de la plataforma para renovar."
+                  : "Tu renovación se aproxima. Considera realizar el pago para mantener el servicio activo."}
+              </small>
+            </div>
+          </section>
+        )}
+
+        {/* MOSAICO */}
+
+        {module ===
+          "dashboard" &&
+          navigationMode ===
+            "mosaic" &&
+          !mosaicDashboardOpen && (
+            <div className="pos-mosaic-home">
+
+              <header className="pos-mosaic-header">
+
+                <div className="pos-mosaic-heading">
+                  <span>
+                    <LayoutDashboard />
+                  </span>
+
+                  <div>
+                    <h1>Inicio</h1>
+
+                    <p>
+                      Elige un módulo
+                      para comenzar
+                    </p>
+                  </div>
+                </div>
+
+                <div className="pos-mosaic-context">
+
+                  <div className="pos-context-card">
+                    <span>
+                      <Building2 />
+                    </span>
+
+                    <div>
+                      <small>
+                        EMPRESA
+                      </small>
+
+                      <b>
+                        {
+                          store.businessName
+                        }
+                      </b>
+                    </div>
+                  </div>
+
+                  <label className="pos-context-card pos-branch-card">
+                    <span>
+                      <ParkingCircle />
+                    </span>
+
+                    <div>
+                      <small>
+                        SUCURSAL ACTIVA
+                      </small>
+
+                      <select
+                        value={
+                          store.lotId
+                        }
+                        disabled={
+                          !store.lots
+                            .length
+                        }
+                        onChange={(e) =>
+                          store.setLotId(
+                            e.target
+                              .value,
+                          )
+                        }
+                      >
+                        {store.lots
+                          .filter(
+                            (lot) =>
+                              canAccessLot(
+                                lot.id,
+                              ),
+                          )
+                          .map(
+                            (lot) => (
+                              <option
+                                key={
+                                  lot.id
+                                }
+                                value={
+                                  lot.id
+                                }
+                              >
+                                {
+                                  lot.name
+                                }
+                              </option>
+                            ),
+                          )}
+                      </select>
+                    </div>
+                  </label>
+
+                  <button
+                    className="pos-icon-button"
+                    aria-label="Notificaciones"
+                  >
+                    <Bell />
+
+                    {pendingCount >
+                      0 && (
+                      <em>
+                        {pendingCount >
+                        9
+                          ? "9+"
+                          : pendingCount}
+                      </em>
+                    )}
+                  </button>
+
+                  <div className="pos-user-card">
+
+                    <span>
+                      {store.profile.fullName
+                        .split(" ")
+                        .map(
+                          (value) =>
+                            value[0],
+                        )
+                        .join("")
+                        .slice(0, 2)}
+                    </span>
+
+                    <div>
+                      <b>
+                        {
+                          store.profile
+                            .fullName
+                        }
+                      </b>
+
+                      <small>
+                        {getRoleLabel(
+                          store.profile
+                            .role,
+                        )}
+                      </small>
+                    </div>
+
+                  </div>
+
+                  <button
+                    className="pos-icon-button"
+                    aria-label="Cerrar sesión"
+                    onClick={() =>
+                      void store.signOut()
+                    }
+                  >
+                    <LogOut />
+                  </button>
+
+                </div>
+              </header>
+
+              {store
+                .businessSubscription
+                .planType ===
+                "demo" && (
+                <section
+                  className={`pos-demo-notice ${
+                    subscriptionDays !==
+                      null &&
+                    subscriptionDays <
+                      0
+                      ? "expired"
+                      : ""
+                  }`}
+                >
+                  <span>
+                    <Clock3 />
+                  </span>
+
+                  <div>
+                    <b>
+                      Demostración ·{" "}
+                      {
+                        subscriptionExpiry
+                      }
+                    </b>
+
+                    <small>
+                      Todos tus datos
+                      se conservarán al
+                      contratar un
+                      plan.
+                    </small>
+                  </div>
+                </section>
+              )}
+
+              <div className="pos-mosaic-body">
+
+                <section className="pos-mosaic-hero">
+
+                  <div>
+                    <p>
+                      <i /> OPERACIÓN{" "}
+                      {store.source ===
+                      "supabase"
+                        ? "LISTA"
+                        : "EN CONSULTA"}
+                    </p>
+
+                    <h2>
+                      Hola,{" "}
+                      {
+                        store.profile.fullName.split(
+                          " ",
+                        )[0]
+                      }.
+                      <span>
+                        {" "}
+                        (
+                        {getRoleLabel(
+                          store.profile
+                            .role,
+                        )}
+                        )
+                      </span>
+                    </h2>
+
+                    <small>
+                      {store.source ===
+                      "offline"
+                        ? "Recupera la conexión para continuar operando."
+                        : "Elige una herramienta para comenzar tu jornada."}
+                    </small>
+                  </div>
+
+                  {canViewModule(
+                    "entries",
+                  ) && (
+                    <button
+                      onClick={() =>
+                        setModule(
+                          "entries",
+                        )
+                      }
+                    >
+                      <span>
+                        <ArrowRightLeft />
+                      </span>
+
+                      <b>
+                        Entradas y
+                        salidas
+
+                        <small>
+                          Gestionar
+                          accesos,
+                          vehículos y
+                          cobros
+                        </small>
+                      </b>
+
+                      <ChevronRight />
+                    </button>
+                  )}
+
+                </section>
+
+                <MosaicModuleSection
+                  title="Operación"
+                  subtitle="Herramientas para el trabajo diario"
+                  items={nav.filter(
+                    (item) =>
+                      ![
+                        "staff",
+                        "settings",
+                      ].includes(
+                        item.id,
+                      ) &&
+                      canViewModule(
+                        item.id,
+                      ),
+                  )}
+                  onSelect={
+                    openMosaicModule
+                  }
+                />
+
+                {nav.some(
+                  (item) =>
+                    [
+                      "staff",
+                      "settings",
+                    ].includes(
+                      item.id,
+                    ) &&
+                    canViewModule(
+                      item.id,
+                    ),
+                ) && (
+                  <div className="pos-admin-zone">
+
+                    <span className="pos-admin-badge">
+                      <ShieldCheck />
+                      Acceso
+                      administrativo
+                    </span>
+
+                    <MosaicModuleSection
+                      title="Administración"
+                      subtitle="Control y configuración del estacionamiento"
+                      items={nav.filter(
+                        (item) =>
+                          [
+                            "staff",
+                            "settings",
+                          ].includes(
+                            item.id,
+                          ) &&
+                          canViewModule(
+                            item.id,
+                          ),
+                      )}
+                      onSelect={
+                        openMosaicModule
+                      }
+                    />
+
+                  </div>
+                )}
+
+              </div>
+            </div>
+          )}
+
+        {/* DASHBOARD */}
+
+        {module ===
+          "dashboard" &&
+          (navigationMode ===
+            "sidebar" ||
+            mosaicDashboardOpen) && (
+            <div className="screen desktop-dashboard">
+
+              <section className="intro dashboard-intro">
+
+                <div>
+                  <p className="eyebrow">
+                    PANORAMA DEL
+                    ESTACIONAMIENTO
+                  </p>
+
+                  <p>
+                    Ocupación, ingresos
+                    y operación en un
+                    solo lugar.
+                  </p>
+                </div>
+
+                <div className="dashboard-intro-actions">
+
+                  <span className="date-badge">
+                    <Clock3
+                      size={16}
+                    />
+
+                    {currentDate}
+                  </span>
+
+                  <div className="intro-actions">
+
+                    {hasPermission(
+                      "stays.checkout",
+                    ) &&
+                      hasPermission(
+                        "payments.create",
+                      ) && (
+                        <button
+                          className="secondary"
+                          onClick={() =>
+                            openCheckout()
+                          }
+                        >
+                          Procesar salida
+                        </button>
+                      )}
+
+                    {hasPermission(
+                      "stays.create",
+                    ) && (
+                      <button
+                        className="primary"
+                        onClick={() =>
+                          setModal(
+                            "entry",
+                          )
+                        }
+                      >
+                        ＋ Registrar
+                        entrada
+                      </button>
+                    )}
+
+                  </div>
+                </div>
+              </section>
+
+              <section className="stats">
+
+                <Stat
+                  label="Vehículos dentro"
+                  value={String(
+                    store.active.length,
+                  )}
+                  hint={`${occupancy}% de ocupación`}
+                  tone="green"
+                  icon={CarFront}
+                />
+
+                <Stat
+                  label="Espacios disponibles"
+                  value={String(
+                    available,
+                  )}
+                  hint={`de ${store.lot.capacity} totales`}
+                  tone="blue"
+                  icon={
+                    ParkingCircle
+                  }
+                />
+
+                <Stat
+                  label="Ingresos del turno"
+                  value={currency.format(
+                    revenue,
+                  )}
+                  hint="Cobros confirmados"
+                  tone="amber"
+                  icon={
+                    CircleDollarSign
+                  }
+                />
+
+                <Stat
+                  label="Tiempo promedio"
+                  value="1 h 42 m"
+                  hint="por vehículo"
+                  tone="violet"
+                  icon={Clock3}
+                />
+
+              </section>
+
+              <section className="dash-grid">
+
+                <article className="card activity">
+
+                  <div className="card-head">
+
+                    <div>
+                      <p className="eyebrow">
+                        OPERACIÓN EN
+                        VIVO
+                      </p>
+
+                      <h3>
+                        Vehículos
+                        activos
+                      </h3>
+                    </div>
+
+                    {hasPermission(
+                      "stays.view",
+                    ) && (
+                      <button
+                        onClick={() =>
+                          setModule(
+                            "entries",
+                          )
+                        }
+                      >
+                        Ver todos →
+                      </button>
+                    )}
+
+                  </div>
+
+                  <div className="search">
+                    <span>⌕</span>
+
+                    <input
+                      value={query}
+                      onChange={(e) =>
+                        setQuery(
+                          e.target
+                            .value,
+                        )
+                      }
+                      placeholder="Buscar placa, vehículo o folio"
+                      aria-label="Buscar vehículos"
+                    />
+                  </div>
+
+                  <StayList
+                    stays={activeFiltered.slice(
+                      0,
+                      5,
+                    )}
+                    onOpen={
+                      openCheckout
+                    }
+                    canOperate={
+                      hasPermission(
+                        "stays.checkout",
+                      ) &&
+                      hasPermission(
+                        "payments.create",
+                      )
+                    }
+                  />
+
+                </article>
+
+                <aside className="card quick">
+
+                  <div className="card-head">
+                    <div>
+                      <p className="eyebrow">
+                        ATAJOS
+                      </p>
+
+                      <h3>
+                        Acciones rápidas
+                      </h3>
+                    </div>
+                  </div>
+
+                  {hasPermission(
+                    "stays.create",
+                  ) && (
+                    <button
+                      onClick={() =>
+                        setModal(
+                          "entry",
+                        )
+                      }
+                    >
+                      <span className="action-icon green">
+                        ＋
+                      </span>
+
+                      <div>
+                        <b>
+                          Nueva entrada
+                        </b>
+
+                        <small>
+                          Generar e
+                          imprimir boleto
+                        </small>
+                      </div>
+
+                      <i>›</i>
+                    </button>
+                  )}
+
+                  {hasPermission(
+                    "stays.checkout",
+                  ) &&
+                    hasPermission(
+                      "payments.create",
+                    ) && (
+                      <button
+                        onClick={() =>
+                          openCheckout()
+                        }
+                      >
+                        <span className="action-icon blue">
+                          ⌗
+                        </span>
+
+                        <div>
+                          <b>
+                            Procesar salida
+                          </b>
+
+                          <small>
+                            Escanear QR o
+                            buscar placa
+                          </small>
+                        </div>
+
+                        <i>›</i>
+                      </button>
+                    )}
+
+                  {hasPermission(
+                    "shifts.view",
+                  ) && (
+                    <button
+                      onClick={() =>
+                        setModule(
+                          "shifts",
+                        )
+                      }
+                    >
+                      <span className="action-icon amber">
+                        ▣
+                      </span>
+
+                      <div>
+                        <b>Cajas</b>
+
+                        <small>
+                          Consultar puntos
+                          de cobro
+                        </small>
+                      </div>
+
+                      <i>›</i>
+                    </button>
+                  )}
+
+                  {hasPermission(
+                    "settings.view",
+                  ) && (
+                    <div className="rate-box">
+                      <span>
+                        Tarifa actual
+                      </span>
+
+                      <b>
+                        {currency.format(
+                          store.rate.price,
+                        )}{" "}
+                        <small>
+                          /{" "}
+                          {
+                            store.rate
+                              .fractionMinutes
+                          }{" "}
+                          min
+                        </small>
+                      </b>
+
+                      {hasPermission(
+                        "rates.manage",
+                      ) && (
+                        <button
+                          onClick={() =>
+                            setModule(
+                              "settings",
+                            )
+                          }
+                        >
+                          Editar
+                        </button>
+                      )}
+                    </div>
+                  )}
+
+                </aside>
+
+              </section>
+
+              <section className="system-bar">
+
+                <div>
+                  <i />
+
+                  <span>
+                    <b>
+                      Sistema operando
+                      correctamente
+                    </b>
+
+                    <small>
+                      Datos guardados y
+                      dispositivos listos
+                    </small>
+                  </span>
+                </div>
+
+                <p>
+                  Impresora{" "}
+                  <b>● Conectada</b>
+                </p>
+
+                <p>
+                  Lector QR{" "}
+                  <b>● Listo</b>
+                </p>
+
+              </section>
+
+            </div>
+          )}
+
+        {/* ENTRADAS Y SALIDAS */}
+
+        {(module === "entries" ||
+          module ===
+            "vehicles") && (
+          <div className="screen stays-screen">
+
+            <OperationSummary
+              active={
+                store.active.length
+              }
+              available={available}
+              capacity={
+                store.lot.capacity
+              }
+              occupancy={occupancy}
+              pending={
+                pendingCount
+              }
+            />
+
+            <section className="scan-workspace scan-workspace-inline">
+
+              <div className="scan-input">
+
+                <ScanLine
+                  size={20}
+                />
+
+                <input
+                  ref={scanInputRef}
+                  value={query}
+                  onChange={(e) =>
+                    setQuery(
+                      e.target.value,
+                    )
+                  }
+                  onKeyDown={
+                    handleScanKey
+                  }
+                  onBlur={() =>
+                    window.setTimeout(
+                      () => {
+                        if (
+                          !modalRef.current
+                        ) {
+                          scanInputRef.current?.focus();
+                        }
+                      },
+                      100,
+                    )
+                  }
+                  placeholder="Escanea QR / código de barras o escribe placa, folio, marca…"
+                  aria-label="Escanear boleto o buscar vehículo"
+                  autoComplete="off"
+                  inputMode="search"
+                />
+
+                <kbd>ENTER</kbd>
+
+              </div>
+
+              <button
+                type="button"
+                className="camera-inline-button"
+                onClick={() =>
+                  setModal(
+                    "camera",
+                  )
+                }
+              >
+                <ScanLine
+                  size={19}
+                />
+
+                <span>
+                  Usar cámara
+                </span>
+              </button>
+
+              {hasPermission(
+                "stays.create",
+              ) && (
+                <button
+                  type="button"
+                  className="primary entry-inline-button"
+                  onClick={() =>
+                    setModal(
+                      "entry",
+                    )
+                  }
+                >
+                  <Plus
+                    size={19}
+                  />
+
+                  <span>
+                    Nueva entrada
+                  </span>
+                </button>
+              )}
+
+              <p>
+                <i /> Lector conectado
+                y esperando código
+              </p>
+
+            </section>
+
+            <article className="card list-card">
+
+              <div className="daily-list-heading">
+
+                <div>
+                  <h3>
+                    Vehículos activos
+                  </h3>
+                </div>
+
+                <div className="entry-shift-actions">
+
+                  <div
+                    className={`entry-shift-badge ${store.shift.status}`}
+                  >
+                    <i />
+
+                    {store.shift
+                      .status ===
+                    "open"
+                      ? `${
+                          store.cashRegisters.find(
+                            (item) =>
+                              item.id ===
+                              store.shift
+                                .cashRegisterId,
+                          )?.name ??
+                          "Caja"
+                        } abierta`
+                      : "Caja cerrada"}
+                  </div>
+
+                  {hasPermission(
+                    "shifts.manage",
+                  ) &&
+                    store.shift
+                      .status ===
+                      "open" && (
+                      <button
+                        className="close-register-button"
+                        onClick={() => {
+                          setCountedCash(
+                            cashRevenue +
+                              store.shift
+                                .openingCash,
+                          );
+
+                          setModal(
+                            "closeShift",
+                          );
+                        }}
+                      >
+                        <WalletCards
+                          size={14}
+                        />
+                        Cerrar caja
+                      </button>
+                    )}
+
+                </div>
+
+                <span>
+                  {
+                    visibleStays.length
+                  }{" "}
+                  {visibleStays.length ===
+                  1
+                    ? "vehículo"
+                    : "vehículos"}
+                </span>
+
+              </div>
+
+              <div className="list-head">
+                <span>Vehículo</span>
+                <span>Entrada</span>
+                <span>Tiempo</span>
+                <span>
+                  Estado y acción
+                </span>
+              </div>
+
+              <StayList
+                stays={
+                  visibleStays
+                }
+                onOpen={
+                  openCheckout
+                }
+                canOperate={
+                  hasPermission(
+                    "stays.checkout",
+                  ) &&
+                  hasPermission(
+                    "payments.create",
+                  )
+                }
+              />
+
+            </article>
+
           </div>
-        </header>
-        {store.businessSubscription.planType==="demo"&&<section className={`pos-demo-notice ${subscriptionDays!==null&&subscriptionDays<0?"expired":""}`}><span><Clock3/></span><div><b>Demostración · {subscriptionExpiry}</b><small>Todos tus datos se conservarán al contratar un plan.</small></div></section>}
-        <div className="pos-mosaic-body">
-          <section className="pos-mosaic-hero"><div><p><i/> OPERACIÓN {store.source==="supabase"?"LISTA":"EN CONSULTA"}</p><h2>Hola, {store.profile.fullName.split(" ")[0]}. <span>({roleLabel[store.profile.role]||store.profile.role})</span></h2><small>{store.source==="offline"?"Recupera la conexión para continuar operando.":"Elige una herramienta para comenzar tu jornada."}</small></div>{canViewModule("entries")&&<button onClick={()=>setModule("entries")}><span><ArrowRightLeft/></span><b>Entradas y salidas<small>Gestionar accesos, vehículos y cobros</small></b><ChevronRight/></button>}</section>
-          <MosaicModuleSection title="Operación" subtitle="Herramientas para el trabajo diario" items={nav.filter(item=>!["staff","settings"].includes(item.id)&&canViewModule(item.id))} onSelect={openMosaicModule}/>
-          {nav.some(item=>["staff","settings"].includes(item.id)&&canViewModule(item.id))&&<div className="pos-admin-zone"><span className="pos-admin-badge"><ShieldCheck/> Acceso administrativo</span><MosaicModuleSection title="Administración" subtitle="Control y configuración del estacionamiento" items={nav.filter(item=>["staff","settings"].includes(item.id)&&canViewModule(item.id))} onSelect={openMosaicModule}/></div>}
+        )}
+
+        {/* CAJAS */}
+
+        {module ===
+          "shifts" && (
+          <section className="screen register-catalog">
+
+            <div className="register-catalog-head">
+
+              <div>
+                <p className="eyebrow">
+                  PUNTOS DE COBRO
+                </p>
+
+                <h2>
+                  Cajas de la
+                  sucursal
+                </h2>
+
+                <p>
+                  {hasPermission(
+                    "shifts.manage",
+                  )
+                    ? "Selecciona una caja disponible para abrir el siguiente turno."
+                    : "Consulta el estado de las cajas asignadas a tu sucursal."}
+                </p>
+              </div>
+
+              {hasPermission(
+                "shifts.manage",
+              ) && (
+                <button
+                  className="secondary"
+                  onClick={() => {
+                    setRegisterName(
+                      "",
+                    );
+
+                    setModal(
+                      "cashRegister",
+                    );
+                  }}
+                >
+                  <Plus
+                    size={16}
+                  />
+                  Nueva caja
+                </button>
+              )}
+
+            </div>
+
+            <div className="register-grid">
+
+              {store.cashRegisters.filter(
+                (register) =>
+                  register.lotId ===
+                  store.lotId,
+              ).length ? (
+                store.cashRegisters
+                  .filter(
+                    (register) =>
+                      register.lotId ===
+                      store.lotId,
+                  )
+                  .map((register) => {
+                    const isOpen =
+                      store.shift
+                        .status ===
+                        "open" &&
+                      store.shift
+                        .cashRegisterId ===
+                        register.id;
+
+                    return (
+                      <article
+                        className={`card register-card ${
+                          isOpen
+                            ? "open"
+                            : ""
+                        }`}
+                        key={
+                          register.id
+                        }
+                      >
+                        <span>
+                          <WalletCards />
+                        </span>
+
+                        <div>
+                          <small>
+                            {
+                              register.code
+                            }
+                          </small>
+
+                          <h3>
+                            {
+                              register.name
+                            }
+                          </h3>
+
+                          <p>
+                            {isOpen
+                              ? `Turno abierto por ${store.shift.openedBy}`
+                              : "Disponible para abrir turno"}
+                          </p>
+                        </div>
+
+                        <em>
+                          <i />
+
+                          {isOpen
+                            ? "Abierta"
+                            : "Disponible"}
+                        </em>
+
+                        {hasPermission(
+                          "shifts.manage",
+                        ) &&
+                          !isOpen &&
+                          store.shift
+                            .status !==
+                            "open" && (
+                            <button
+                              className="secondary"
+                              onClick={() => {
+                                setSelectedRegisterId(
+                                  register.id,
+                                );
+
+                                setRegisterName(
+                                  register.name,
+                                );
+
+                                setModal(
+                                  "openShift",
+                                );
+                              }}
+                            >
+                              Abrir
+                            </button>
+                          )}
+                      </article>
+                    );
+                  })
+              ) : (
+                <article className="card register-empty">
+
+                  <WalletCards />
+
+                  <p>
+                    No hay cajas
+                    registradas en esta
+                    sucursal.
+                  </p>
+
+                  {hasPermission(
+                    "shifts.manage",
+                  ) && (
+                    <button
+                      className="primary"
+                      onClick={() => {
+                        setRegisterName(
+                          "",
+                        );
+
+                        setModal(
+                          "cashRegister",
+                        );
+                      }}
+                    >
+                      Crear primera
+                      caja
+                    </button>
+                  )}
+
+                </article>
+              )}
+
+            </div>
+          </section>
+        )}
+
+        {/* PANTALLAS EXTRAÍDAS */}
+
+        {module ===
+          "cashCuts" && (
+          <CashCuts
+            store={store}
+          />
+        )}
+
+        {module ===
+          "reports" && (
+          <Reports
+            store={store}
+          />
+        )}
+
+        {module ===
+          "staff" && (
+          <Staff
+            store={store}
+            notify={notify}
+          />
+        )}
+
+        {module ===
+          "settings" && (
+          <Settings
+            store={store}
+            notify={notify}
+            navigationMode={
+              navigationMode
+            }
+            onNavigationModeChange={
+              changeNavigationMode
+            }
+          />
+        )}
+
+      </AppShell>
+
+      {/* =====================================================
+          MODALES
+      ===================================================== */}
+
+      <Modal
+        open={modal !== null}
+        onClose={() =>
+          setModal(null)
+        }
+      >
+
+        {/* NUEVA ENTRADA */}
+
+        {modal === "entry" && (
+          <form
+            onSubmit={submitEntry}
+          >
+            <ModalHeader
+              overline="NUEVA ENTRADA"
+              title="Registra el vehículo"
+              text="Selecciona el tipo de unidad para aplicar automáticamente su tarifa."
+            />
+
+            <label>
+              Tipo de unidad
+
+              <select
+                autoFocus
+                value={
+                  vehicleTypeId ||
+                  store
+                    .vehicleTypes[0]
+                    ?.id ||
+                  ""
+                }
+                onChange={(e) =>
+                  setVehicleTypeId(
+                    e.target.value,
+                  )
+                }
+                required
+              >
+                {store.vehicleTypes.map(
+                  (type) => (
+                    <option
+                      key={
+                        type.id
+                      }
+                      value={
+                        type.id
+                      }
+                    >
+                      {type.name}
+                    </option>
+                  ),
+                )}
+              </select>
+
+              <small>
+                La tarifa se
+                calculará con base en
+                esta clasificación.
+              </small>
+            </label>
+
+            <label>
+              Placas
+
+              <input
+                value={plate}
+                onChange={(e) =>
+                  setPlate(
+                    displayPlate(
+                      e.target
+                        .value,
+                    ),
+                  )
+                }
+                placeholder="ABC-123-A"
+                required
+              />
+            </label>
+
+            <div className="form-grid">
+
+              <label>
+                Marca
+
+                <input
+                  value={make}
+                  onChange={(e) =>
+                    setMake(
+                      e.target
+                        .value,
+                    )
+                  }
+                  placeholder="Ej. Nissan"
+                />
+              </label>
+
+              <label>
+                Modelo
+
+                <input
+                  value={model}
+                  onChange={(e) =>
+                    setModel(
+                      e.target
+                        .value,
+                    )
+                  }
+                  placeholder="Ej. Versa"
+                />
+              </label>
+
+            </div>
+
+            <label>
+              Color
+
+              <input
+                value={color}
+                onChange={(e) =>
+                  setColor(
+                    e.target.value,
+                  )
+                }
+                placeholder="Ej. Gris"
+              />
+            </label>
+
+            <button
+              className="primary full"
+              type="submit"
+              disabled={
+                saving ||
+                !store
+                  .vehicleTypes
+                  .length
+              }
+            >
+              {saving
+                ? "Guardando…"
+                : "Generar boleto →"}
+            </button>
+
+          </form>
+        )}
+
+        {/* TICKET */}
+
+        {modal ===
+          "ticket" &&
+          selected && (
+            <div className="ticket-modal">
+
+              <ModalHeader
+                overline="ENTRADA REGISTRADA"
+                title="Boleto listo"
+                text="Código generado correctamente."
+              />
+
+              <div className="paper-ticket">
+
+                <Brand />
+
+                <h3>
+                  {selected.plate}
+                </h3>
+
+                <p>
+                  {selected.folio}
+                </p>
+
+                <TicketCodes
+                  token={
+                    selected.qrToken
+                  }
+                  barcode={
+                    selected.barcodeValue
+                  }
+                />
+
+                <dl>
+                  <div>
+                    <dt>
+                      Entrada
+                    </dt>
+
+                    <dd>
+                      {clock.format(
+                        new Date(
+                          selected.enteredAt,
+                        ),
+                      )}
+                    </dd>
+                  </div>
+
+                  <div>
+                    <dt>
+                      Tarifa
+                    </dt>
+
+                    <dd>
+                      {currency.format(
+                        store.rate
+                          .price,
+                      )}{" "}
+                      /{" "}
+                      {
+                        store.rate
+                          .fractionMinutes
+                      }{" "}
+                      min
+                    </dd>
+                  </div>
+                </dl>
+
+                <small>
+                  Conserva este boleto
+                  para registrar tu
+                  salida.
+                </small>
+
+              </div>
+
+              <button
+                className="primary full"
+                onClick={() => {
+                  notify(
+                    "Boleto enviado a la impresora térmica",
+                  );
+
+                  window.setTimeout(
+                    () =>
+                      window.print(),
+                    300,
+                  );
+                }}
+              >
+                ▣ Imprimir boleto
+              </button>
+
+            </div>
+          )}
+
+        {/* CHECKOUT */}
+
+        {modal ===
+          "checkout" && (
+          <div>
+
+            <ModalHeader
+              overline="SALIDA IDENTIFICADA"
+              title="Confirmar cobro"
+              text="Verifica el vehículo y selecciona el método de pago."
+            />
+
+            <label>
+              Vehículo
+
+              <select
+                value={
+                  selected?.id ??
+                  ""
+                }
+                onChange={(e) =>
+                  setSelected(
+                    store.active.find(
+                      (stay) =>
+                        stay.id ===
+                        e.target
+                          .value,
+                    ) ?? null,
+                  )
+                }
+              >
+                <option value="">
+                  Selecciona una
+                  placa
+                </option>
+
+                {store.active.map(
+                  (stay) => (
+                    <option
+                      key={
+                        stay.id
+                      }
+                      value={
+                        stay.id
+                      }
+                    >
+                      {stay.plate} ·{" "}
+                      {stay.folio}
+                    </option>
+                  ),
+                )}
+              </select>
+            </label>
+
+            {selected && (
+              <>
+                <div className="charge checkout-charge">
+
+                  <span className="vehicle-icon">
+                    <CarFront
+                      size={19}
+                    />
+                  </span>
+
+                  <div>
+                    <b>
+                      {
+                        selected.plate
+                      }
+                    </b>
+
+                    <small>
+                      {duration(
+                        selected.enteredAt,
+                      )}{" "}
+                      ·{" "}
+                      {
+                        selected.folio
+                      }
+                    </small>
+                  </div>
+
+                  <strong>
+                    {currency.format(
+                      store.calculate(
+                        selected,
+                      ),
+                    )}
+                  </strong>
+
+                </div>
+
+                <p className="payment-label">
+                  Método de pago
+                </p>
+
+                <div className="methods">
+
+                  {(
+                    [
+                      "cash",
+                      "card",
+                      "transfer",
+                    ] as const
+                  ).map(
+                    (
+                      paymentMethod,
+                    ) => (
+                      <button
+                        type="button"
+                        key={
+                          paymentMethod
+                        }
+                        className={
+                          method ===
+                          paymentMethod
+                            ? "active"
+                            : ""
+                        }
+                        onClick={() =>
+                          setMethod(
+                            paymentMethod,
+                          )
+                        }
+                      >
+                        {paymentMethod ===
+                        "cash"
+                          ? "Efectivo"
+                          : paymentMethod ===
+                            "card"
+                          ? "Tarjeta"
+                          : "Transferencia"}
+                      </button>
+                    ),
+                  )}
+
+                </div>
+
+                <button
+                  className="primary full"
+                  type="button"
+                  onClick={() =>
+                    void pay()
+                  }
+                  disabled={saving}
+                >
+                  {saving
+                    ? "Procesando…"
+                    : `Cobrar ${currency.format(
+                        store.calculate(
+                          selected,
+                        ),
+                      )}`}
+                </button>
+
+              </>
+            )}
+
+          </div>
+        )}
+
+        {/* CAMERA */}
+
+        {modal ===
+          "camera" && (
+          <CameraScanner
+            onDetected={(
+              value,
+            ) => {
+              const stay =
+                findScannedStay(
+                  value,
+                );
+
+              if (stay) {
+                openCheckout(
+                  stay,
+                );
+              } else {
+                notify(
+                  "El código leído no corresponde a una estancia activa",
+                );
+              }
+            }}
+          />
+        )}
+
+        {/* NUEVA CAJA */}
+
+        {modal ===
+          "cashRegister" && (
+          <form
+            onSubmit={
+              submitCashRegister
+            }
+            className="shift-form"
+          >
+            <ModalHeader
+              overline="NUEVA CAJA"
+              title="Agregar punto de cobro"
+              text={`Crea una caja adicional para ${store.lot.name}.`}
+            />
+
+            <div className="shift-form-icon">
+
+              <WalletCards />
+
+              <div>
+                <b>
+                  Caja adicional
+                </b>
+
+                <small>
+                  Después podrás
+                  seleccionarla por su
+                  nombre al abrir un
+                  turno.
+                </small>
+              </div>
+
+            </div>
+
+            <label>
+              Nombre de la caja
+
+              <input
+                autoFocus
+                value={
+                  registerName
+                }
+                onChange={(e) =>
+                  setRegisterName(
+                    e.target.value,
+                  )
+                }
+                placeholder="Ej. Caja salida norte"
+                required
+              />
+            </label>
+
+            <button
+              className="primary full"
+              type="submit"
+              disabled={saving}
+            >
+              {saving
+                ? "Creando caja…"
+                : "Crear caja"}
+            </button>
+
+          </form>
+        )}
+
+        {/* ABRIR TURNO */}
+
+        {modal ===
+          "openShift" && (
+          <form
+            onSubmit={
+              submitOpenShift
+            }
+            className="shift-form"
+          >
+            <ModalHeader
+              overline="APERTURA DE CAJA"
+              title="Abrir nuevo turno"
+              text={`Selecciona la caja y registra el fondo inicial para ${store.lot.name}.`}
+            />
+
+            <div className="shift-form-icon">
+
+              <WalletCards />
+
+              <div>
+                <b>
+                  Control de cobros
+                </b>
+
+                <small>
+                  Todos los pagos
+                  quedarán vinculados
+                  a este turno.
+                </small>
+              </div>
+
+            </div>
+
+            {store.cashRegisters.filter(
+              (register) =>
+                register.lotId ===
+                store.lotId,
+            ).length ? (
+              <label>
+                Caja
+
+                <select
+                  autoFocus
+                  value={
+                    selectedRegisterId ||
+                    store.cashRegisters.find(
+                      (register) =>
+                        register.lotId ===
+                        store.lotId,
+                    )?.id ||
+                    ""
+                  }
+                  onChange={(e) => {
+                    const register =
+                      store.cashRegisters.find(
+                        (item) =>
+                          item.id ===
+                          e.target
+                            .value,
+                      );
+
+                    setSelectedRegisterId(
+                      e.target.value,
+                    );
+
+                    setRegisterName(
+                      register?.name ??
+                        "",
+                    );
+                  }}
+                >
+                  {store.cashRegisters
+                    .filter(
+                      (register) =>
+                        register.lotId ===
+                        store.lotId,
+                    )
+                    .map(
+                      (register) => (
+                        <option
+                          key={
+                            register.id
+                          }
+                          value={
+                            register.id
+                          }
+                        >
+                          {
+                            register.name
+                          }{" "}
+                          ·{" "}
+                          {
+                            register.code
+                          }
+                        </option>
+                      ),
+                    )}
+                </select>
+
+                <small>
+                  ¿Necesitas otra?
+                  Créala desde “Nueva
+                  caja”.
+                </small>
+              </label>
+            ) : (
+              <label>
+                Nombre de la primera
+                caja
+
+                <input
+                  autoFocus
+                  value={
+                    registerName
+                  }
+                  onChange={(e) =>
+                    setRegisterName(
+                      e.target
+                        .value,
+                    )
+                  }
+                  placeholder="Caja principal"
+                  required
+                />
+              </label>
+            )}
+
+            <label>
+              Fondo inicial
+
+              <div className="input-affix">
+                <span>$</span>
+
+                <input
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  value={
+                    openingCash
+                  }
+                  onChange={(e) =>
+                    setOpeningCash(
+                      Number(
+                        e.target
+                          .value,
+                      ),
+                    )
+                  }
+                  required
+                />
+
+                <span>MXN</span>
+              </div>
+            </label>
+
+            <div className="creation-summary">
+              <CheckCircle2 />
+
+              <p>
+                Al abrir la caja se
+                habilitarán los cobros
+                en esta sucursal.
+              </p>
+            </div>
+
+            <button
+              className="primary full"
+              type="submit"
+              disabled={saving}
+            >
+              {saving
+                ? "Abriendo caja…"
+                : "Abrir caja y comenzar"}
+            </button>
+
+          </form>
+        )}
+
+        {/* CERRAR TURNO */}
+
+        {modal ===
+          "closeShift" && (
+          <form
+            onSubmit={
+              submitCloseShift
+            }
+          >
+            <ModalHeader
+              overline="CIERRE DE TURNO"
+              title="Corte de caja"
+              text="Confirma el efectivo contado antes de cerrar."
+            />
+
+            <label>
+              Efectivo contado
+
+              <input
+                type="number"
+                min="0"
+                step="0.01"
+                value={
+                  countedCash
+                }
+                onChange={(e) =>
+                  setCountedCash(
+                    Number(
+                      e.target.value,
+                    ),
+                  )
+                }
+                required
+              />
+            </label>
+
+            <label>
+              Notas del cierre
+
+              <input
+                value={
+                  shiftNotes
+                }
+                onChange={(e) =>
+                  setShiftNotes(
+                    e.target.value,
+                  )
+                }
+                placeholder="Opcional: diferencias, retiros u observaciones"
+              />
+            </label>
+
+            <div className="charge">
+
+              <div>
+                <b>
+                  Efectivo esperado
+                </b>
+
+                <small>
+                  Fondo + cobros en
+                  efectivo
+                </small>
+              </div>
+
+              <strong>
+                {currency.format(
+                  cashRevenue +
+                    store.shift
+                      .openingCash,
+                )}
+              </strong>
+
+            </div>
+
+            <div
+              className={`cash-difference ${
+                countedCash -
+                  (cashRevenue +
+                    store.shift
+                      .openingCash) ===
+                0
+                  ? "balanced"
+                  : "unbalanced"
+              }`}
+            >
+              <span>
+                Diferencia
+              </span>
+
+              <b>
+                {currency.format(
+                  countedCash -
+                    (cashRevenue +
+                      store.shift
+                        .openingCash),
+                )}
+              </b>
+            </div>
+
+            <button
+              className="primary full"
+              type="submit"
+              disabled={saving}
+            >
+              {saving
+                ? "Cerrando turno…"
+                : "Confirmar corte"}
+            </button>
+
+          </form>
+        )}
+
+        {/* LOGIN DE SINCRONIZACIÓN */}
+
+        {modal === "login" && (
+          <form
+            onSubmit={
+              submitSyncLogin
+            }
+          >
+            <ModalHeader
+              overline="SINCRONIZACIÓN"
+              title="Conectar con Supabase"
+              text="Inicia sesión con un usuario asignado al estacionamiento."
+            />
+
+            <label>
+              Correo electrónico
+
+              <input
+                type="email"
+                autoFocus
+                value={
+                  syncEmail
+                }
+                onChange={(e) =>
+                  setSyncEmail(
+                    e.target.value,
+                  )
+                }
+                placeholder="usuario@empresa.com"
+                required
+              />
+            </label>
+
+            <label>
+              Contraseña
+
+              <input
+                type="password"
+                value={
+                  syncPassword
+                }
+                onChange={(e) =>
+                  setSyncPassword(
+                    e.target.value,
+                  )
+                }
+                placeholder="••••••••"
+                required
+              />
+            </label>
+
+            <button
+              className="primary full"
+              type="submit"
+              disabled={
+                loginPending
+              }
+            >
+              {loginPending
+                ? "Conectando…"
+                : "Iniciar sesión"}
+            </button>
+
+          </form>
+        )}
+
+      </Modal>
+
+      {toast && (
+        <div className="toast">
+          ● {toast}
         </div>
-      </div>}
-      {module==="dashboard"&&(navigationMode==="sidebar"||mosaicDashboardOpen)&&<div className="screen desktop-dashboard">
-        <section className="intro dashboard-intro"><div><p className="eyebrow">PANORAMA DEL ESTACIONAMIENTO</p><p>Ocupación, ingresos y operación en un solo lugar.</p></div><div className="dashboard-intro-actions"><span className="date-badge"><Clock3 size={16}/>{currentDate}</span><div className="intro-actions">{hasPermission("stays.checkout")&&hasPermission("payments.create")&&<button className="secondary" onClick={()=>openCheckout()}>Procesar salida</button>}{hasPermission("stays.create")&&<button className="primary" onClick={()=>setModal("entry")}>＋ Registrar entrada</button>}</div></div></section>
-        <section className="stats"><Stat label="Vehículos dentro" value={String(store.active.length)} hint={`${occupancy}% de ocupación`} tone="green" icon={CarFront}/><Stat label="Espacios disponibles" value={String(available)} hint={`de ${store.lot.capacity} totales`} tone="blue" icon={ParkingCircle}/><Stat label="Ingresos del turno" value={currency.format(revenue)} hint="Cobros confirmados" tone="amber" icon={CircleDollarSign}/><Stat label="Tiempo promedio" value="1 h 42 m" hint="por vehículo" tone="violet" icon={Clock3}/></section>
-        <section className="dash-grid"><article className="card activity"><div className="card-head"><div><p className="eyebrow">OPERACIÓN EN VIVO</p><h3>Vehículos activos</h3></div>{hasPermission("stays.view")&&<button onClick={()=>setModule("entries")}>Ver todos →</button>}</div><div className="search"><span>⌕</span><input value={query} onChange={e=>setQuery(e.target.value)} placeholder="Buscar placa, vehículo o folio" aria-label="Buscar vehículos"/></div><StayList stays={activeFiltered.slice(0,5)} onOpen={openCheckout} canOperate={hasPermission("stays.checkout")&&hasPermission("payments.create")}/></article>
-          <aside className="card quick"><div className="card-head"><div><p className="eyebrow">ATAJOS</p><h3>Acciones rápidas</h3></div></div>{hasPermission("stays.create")&&<button onClick={()=>setModal("entry")}><span className="action-icon green">＋</span><div><b>Nueva entrada</b><small>Generar e imprimir boleto</small></div><i>›</i></button>}{hasPermission("stays.checkout")&&hasPermission("payments.create")&&<button onClick={()=>openCheckout()}><span className="action-icon blue">⌗</span><div><b>Procesar salida</b><small>Escanear QR o buscar placa</small></div><i>›</i></button>}{hasPermission("shifts.view")&&<button onClick={()=>setModule("shifts")}><span className="action-icon amber">▣</span><div><b>Cajas</b><small>Consultar puntos de cobro</small></div><i>›</i></button>}{hasPermission("settings.view")&&<div className="rate-box"><span>Tarifa actual</span><b>{currency.format(store.rate.price)} <small>/ {store.rate.fractionMinutes} min</small></b>{hasPermission("rates.manage")&&<button onClick={()=>setModule("settings")}>Editar</button>}</div>}</aside></section>
-        <section className="system-bar"><div><i/><span><b>Sistema operando correctamente</b><small>Datos guardados y dispositivos listos</small></span></div><p>Impresora <b>● Conectada</b></p><p>Lector QR <b>● Listo</b></p></section>
-      </div>}
+      )}
 
-      {(module==="entries"||module==="vehicles")&&<div className="screen stays-screen"><section className="operation-summary"><article><span className="summary-icon green"><CarFront/></span><div><small>Vehículos activos</small><b>{store.active.length}</b></div><em>{occupancy}% ocupado</em></article><article><span className="summary-icon blue"><ParkingCircle/></span><div><small>Espacios libres</small><b>{available}</b></div><em>de {store.lot.capacity}</em></article><article className={pendingCount?"attention":""}><span className="summary-icon amber"><TicketCheck/></span><div><small>Por cobrar</small><b>{pendingCount}</b></div><em>{pendingCount?"Requiere atención":"Todo al día"}</em></article></section><section className="scan-workspace scan-workspace-inline"><div className="scan-input"><Search size={20}/><input ref={scanInputRef} value={query} onChange={e=>setQuery(e.target.value)} onKeyDown={handleScanKey} onBlur={()=>window.setTimeout(()=>{if(!modalRef.current)scanInputRef.current?.focus()},100)} placeholder="Escanea QR / código de barras o escribe placa, folio, marca…" aria-label="Escanear boleto o buscar vehículo" autoComplete="off" inputMode="search"/><kbd>ENTER</kbd></div><button type="button" className="camera-inline-button" onClick={()=>setModal("camera")}><ScanLine size={19}/><span>Usar cámara</span></button>{hasPermission("stays.create")&&<button type="button" className="primary entry-inline-button" onClick={()=>setModal("entry")}><Plus size={19}/><span>Nueva entrada</span></button>}<p><i/> Lector conectado y esperando código</p></section><article className="card list-card"><div className="daily-list-heading"><div><h3>Vehículos activos</h3></div><div className="entry-shift-actions"><div className={`entry-shift-badge ${store.shift.status}`}><i/>{store.shift.status==="open"?`${store.cashRegisters.find(r=>r.id===store.shift.cashRegisterId)?.name??"Caja"} abierta`:"Caja cerrada"}</div>{hasPermission("shifts.manage")&&store.shift.status==="open"&&<button className="close-register-button" onClick={()=>{setCountedCash(cashRevenue+store.shift.openingCash);setModal("closeShift")}}><WalletCards size={14}/> Cerrar caja</button>}</div><span>{visibleStays.length} {visibleStays.length===1?"vehículo":"vehículos"}</span></div><div className="list-head"><span>Vehículo</span><span>Entrada</span><span>Tiempo</span><span>Estado y acción</span></div><StayList stays={visibleStays} onOpen={openCheckout} canOperate={hasPermission("stays.checkout")&&hasPermission("payments.create")}/></article></div>}
-
-      {module==="shifts"&&<section className="screen register-catalog"><div className="register-catalog-head"><div><p className="eyebrow">PUNTOS DE COBRO</p><h2>Cajas de la sucursal</h2><p>{hasPermission("shifts.manage")?"Selecciona una caja disponible para abrir el siguiente turno.":"Consulta el estado de las cajas asignadas a tu sucursal."}</p></div>{hasPermission("shifts.manage")&&<button className="secondary" onClick={()=>{setRegisterName("");setModal("cashRegister")}}><Plus size={16}/> Nueva caja</button>}</div><div className="register-grid">{store.cashRegisters.filter(r=>r.lotId===store.lotId).length?store.cashRegisters.filter(r=>r.lotId===store.lotId).map(register=>{const isOpen=store.shift.status==="open"&&store.shift.cashRegisterId===register.id;return <article className={`card register-card ${isOpen?"open":""}`} key={register.id}><span><WalletCards/></span><div><small>{register.code}</small><h3>{register.name}</h3><p>{isOpen?`Turno abierto por ${store.shift.openedBy}`:"Disponible para abrir turno"}</p></div><em><i/>{isOpen?"Abierta":"Disponible"}</em>{hasPermission("shifts.manage")&&!isOpen&&store.shift.status!=="open"&&<button className="secondary" onClick={()=>{setSelectedRegisterId(register.id);setRegisterName(register.name);setModal("openShift")}}>Abrir</button>}</article>}):<article className="card register-empty"><WalletCards/><p>No hay cajas registradas en esta sucursal.</p>{hasPermission("shifts.manage")&&<button className="primary" onClick={()=>{setRegisterName("");setModal("cashRegister")}}>Crear primera caja</button>}</article>}</div></section>}
-      {module==="cashCuts"&&<CashCuts store={store}/>}
-      {module==="reports"&&<Reports store={store}/>}
-      {module==="staff"&&<Staff store={store} notify={notify}/>}
-      {module==="settings"&&<Settings store={store} notify={notify} navigationMode={navigationMode} onNavigationModeChange={changeNavigationMode}/>}
-    </main>
-
-    <nav className="mobile-nav">{nav.filter(item=>canViewModule(item.id)).map(item=>{const Icon=item.icon;return <button key={item.id} className={module===item.id?"active":""} onClick={()=>setModule(item.id)}><span><Icon size={18}/></span><small>{item.label.split(" ")[0]}</small></button>})}<button className="scan-fab" onClick={()=>setModal("camera")}><ScanLine size={21}/></button></nav>
-    {modal&&<div className="backdrop" onMouseDown={()=>setModal(null)}><section className="modal" role="dialog" aria-modal="true" onMouseDown={e=>e.stopPropagation()}><button className="close" onClick={()=>setModal(null)}>×</button>
-      {modal==="entry"&&<form onSubmit={submitEntry}><ModalHeader overline="NUEVA ENTRADA" title="Registra el vehículo" text="Selecciona el tipo de unidad para aplicar automáticamente su tarifa."/><label>Tipo de unidad<select autoFocus value={vehicleTypeId||store.vehicleTypes[0]?.id||""} onChange={e=>setVehicleTypeId(e.target.value)} required>{store.vehicleTypes.map(type=><option key={type.id} value={type.id}>{type.name}</option>)}</select><small>La tarifa se calculará con base en esta clasificación.</small></label><label>Placas<input value={plate} onChange={e=>setPlate(displayPlate(e.target.value))} placeholder="ABC-123-A" required/></label><div className="form-grid"><label>Marca<input value={make} onChange={e=>setMake(e.target.value)} placeholder="Ej. Nissan"/></label><label>Modelo<input value={model} onChange={e=>setModel(e.target.value)} placeholder="Ej. Versa"/></label></div><label>Color<input value={color} onChange={e=>setColor(e.target.value)} placeholder="Ej. Gris"/></label><button className="primary full" type="submit" disabled={saving||!store.vehicleTypes.length}>{saving?"Guardando…":"Generar boleto →"}</button></form>}
-      {modal==="ticket"&&selected&&<div className="ticket-modal"><ModalHeader overline="ENTRADA REGISTRADA" title="Boleto listo" text="Código generado correctamente."/><div className="paper-ticket"><Brand/><h3>{selected.plate}</h3><p>{selected.folio}</p><TicketCodes token={selected.qrToken} barcode={selected.barcodeValue}/><dl><div><dt>Entrada</dt><dd>{clock.format(new Date(selected.enteredAt))}</dd></div><div><dt>Tarifa</dt><dd>{currency.format(store.rate.price)} / {store.rate.fractionMinutes} min</dd></div></dl><small>Conserva este boleto para registrar tu salida.</small></div><button className="primary full" onClick={()=>{notify("Boleto enviado a la impresora térmica");setTimeout(()=>window.print(),300)}}>▣ Imprimir boleto</button></div>}
-      {modal==="checkout"&&<div><ModalHeader overline="SALIDA IDENTIFICADA" title="Confirmar cobro" text="Verifica el vehículo y selecciona el método de pago."/><label>Vehículo<select value={selected?.id??""} onChange={e=>setSelected(store.active.find(s=>s.id===e.target.value)??null)}><option value="">Selecciona una placa</option>{store.active.map(s=><option key={s.id} value={s.id}>{s.plate} · {s.folio}</option>)}</select></label>{selected&&<><div className="charge checkout-charge"><span className="vehicle-icon"><CarFront size={19}/></span><div><b>{selected.plate}</b><small>{duration(selected.enteredAt)} · {selected.folio}</small></div><strong>{currency.format(store.calculate(selected))}</strong></div><p className="payment-label">Método de pago</p><div className="methods">{(["cash","card","transfer"] as const).map(m=><button key={m} className={method===m?"active":""} onClick={()=>setMethod(m)}>{m==="cash"?"Efectivo":m==="card"?"Tarjeta":"Transferencia"}</button>)}</div><button className="primary full" onClick={pay} disabled={saving}>{saving?"Procesando…":`Cobrar ${currency.format(store.calculate(selected))}`}</button></>}</div>}
-      {modal==="camera"&&<CameraScanner onDetected={value=>{const stay=findScannedStay(value);if(stay)openCheckout(stay);else notify("El código leído no corresponde a una estancia activa")}}/>}
-      {modal==="cashRegister"&&<form onSubmit={submitCashRegister} className="shift-form"><ModalHeader overline="NUEVA CAJA" title="Agregar punto de cobro" text={`Crea una caja adicional para ${store.lot.name}.`}/><div className="shift-form-icon"><WalletCards/><div><b>Caja adicional</b><small>Después podrás seleccionarla por su nombre al abrir un turno.</small></div></div><label>Nombre de la caja<input autoFocus value={registerName} onChange={e=>setRegisterName(e.target.value)} placeholder="Ej. Caja salida norte" required/></label><button className="primary full" type="submit" disabled={saving}>{saving?"Creando caja…":"Crear caja"}</button></form>}
-      {modal==="openShift"&&<form onSubmit={submitOpenShift} className="shift-form"><ModalHeader overline="APERTURA DE CAJA" title="Abrir nuevo turno" text={`Selecciona la caja y registra el fondo inicial para ${store.lot.name}.`}/><div className="shift-form-icon"><WalletCards/><div><b>Control de cobros</b><small>Todos los pagos quedarán vinculados a este turno.</small></div></div>{store.cashRegisters.filter(r=>r.lotId===store.lotId).length?<label>Caja<select autoFocus value={selectedRegisterId||store.cashRegisters.find(r=>r.lotId===store.lotId)?.id||""} onChange={e=>{const register=store.cashRegisters.find(r=>r.id===e.target.value);setSelectedRegisterId(e.target.value);setRegisterName(register?.name??"")}}>{store.cashRegisters.filter(r=>r.lotId===store.lotId).map(register=><option key={register.id} value={register.id}>{register.name} · {register.code}</option>)}</select><small>¿Necesitas otra? Créala desde “Nueva caja”.</small></label>:<label>Nombre de la primera caja<input autoFocus value={registerName} onChange={e=>setRegisterName(e.target.value)} placeholder="Caja principal" required/></label>}<label>Fondo inicial<div className="input-affix"><span>$</span><input type="number" min="0" step="0.01" value={openingCash} onChange={e=>setOpeningCash(Number(e.target.value))} required/><span>MXN</span></div></label><div className="creation-summary"><CheckCircle2/><p>Al abrir la caja se habilitarán los cobros en esta sucursal.</p></div><button className="primary full" type="submit" disabled={saving}>{saving?"Abriendo caja…":"Abrir caja y comenzar"}</button></form>}
-      {modal==="closeShift"&&<form onSubmit={submitCloseShift}><ModalHeader overline="CIERRE DE TURNO" title="Corte de caja" text="Confirma el efectivo contado antes de cerrar."/><label>Efectivo contado<input type="number" min="0" step="0.01" value={countedCash} onChange={e=>setCountedCash(Number(e.target.value))} required/></label><label>Notas del cierre<input value={shiftNotes} onChange={e=>setShiftNotes(e.target.value)} placeholder="Opcional: diferencias, retiros u observaciones"/></label><div className="charge"><div><b>Efectivo esperado</b><small>Fondo + cobros en efectivo</small></div><strong>{currency.format(cashRevenue+store.shift.openingCash)}</strong></div><div className={`cash-difference ${countedCash-(cashRevenue+store.shift.openingCash)===0?"balanced":"unbalanced"}`}><span>Diferencia</span><b>{currency.format(countedCash-(cashRevenue+store.shift.openingCash))}</b></div><button className="primary full" type="submit" disabled={saving}>{saving?"Cerrando turno…":"Confirmar corte"}</button></form>}
-      {modal==="login"&&<form onSubmit={login}><ModalHeader overline="SINCRONIZACIÓN" title="Conectar con Supabase" text="Inicia sesión con un usuario asignado al estacionamiento."/><label>Correo electrónico<input type="email" autoFocus value={email} onChange={e=>setEmail(e.target.value)} placeholder="usuario@empresa.com" required/></label><label>Contraseña<input type="password" value={password} onChange={e=>setPassword(e.target.value)} placeholder="••••••••" required/></label><button className="primary full" type="submit" disabled={saving}>{saving?"Conectando…":"Iniciar sesión"}</button></form>}
-    </section></div>}
-    {toast&&<div className="toast">● {toast}</div>}
-  </div>
+    </>
+  );
 }
-
-const PARKING_CAMERA_KEY="syntra.parking-camera-device";
-type CameraCapabilities=MediaTrackCapabilities&{focusMode?:string[];torch?:boolean};
-function preferredCamera(devices:MediaDeviceInfo[]){const saved=localStorage.getItem(PARKING_CAMERA_KEY),remembered=devices.find(device=>device.deviceId===saved);if(remembered)return remembered;const front=/front|frontal|user|selfie/i,rear=/back|rear|environment|trasera|posterior/i,secondary=/ultra|wide|gran angular|macro|telephoto|telefoto/i,candidates=devices.filter(device=>!front.test(device.label));return candidates.find(device=>rear.test(device.label)&&!secondary.test(device.label))??candidates.find(device=>!secondary.test(device.label))??candidates[0]??devices[0]}
-function cameraName(device:MediaDeviceInfo,index:number){const label=device.label.trim();return !label||/^camera\s*\d*$/i.test(label)?`Cámara ${index+1}`:label.replace(/\s*\([^)]*\)\s*$/," ").trim().slice(0,32)}
-function CameraScanner({onDetected}:{onDetected:(value:string)=>void}){
-  const videoRef=useRef<HTMLVideoElement>(null),controlsRef=useRef<IScannerControls|null>(null),onDetectedRef=useRef(onDetected);onDetectedRef.current=onDetected;
-  const [status,setStatus]=useState("Activando cámara…"),[error,setError]=useState(""),[cameras,setCameras]=useState<MediaDeviceInfo[]>([]),[selectedDeviceId,setSelectedDeviceId]=useState<string|null>(null),[torchSupported,setTorchSupported]=useState(false),[torchOn,setTorchOn]=useState(false),[retry,setRetry]=useState(0);
-  useEffect(()=>{if(!navigator.mediaDevices?.getUserMedia){setError("Este navegador no permite usar la cámara. Abre ParkFlow mediante HTTPS o localhost.");return}let cancelled=false,detected=false;const reader=new BrowserMultiFormatReader();setStatus("Activando cámara…");setError("");setTorchOn(false);setTorchSupported(false);
-    async function start(){try{let cameraId=selectedDeviceId;if(!cameraId){const permission=await navigator.mediaDevices.getUserMedia({audio:false,video:{facingMode:{ideal:"environment"}}});permission.getTracks().forEach(track=>track.stop());const devices=await BrowserMultiFormatReader.listVideoInputDevices();if(cancelled)return;setCameras(devices);const selected=preferredCamera(devices);if(!selected)throw new DOMException("No camera found","NotFoundError");cameraId=selected.deviceId;setSelectedDeviceId(cameraId);localStorage.setItem(PARKING_CAMERA_KEY,cameraId);return}const controls=await reader.decodeFromConstraints({audio:false,video:{deviceId:{exact:cameraId},width:{ideal:1280},height:{ideal:720},frameRate:{ideal:30}}},videoRef.current!,(result)=>{if(cancelled||detected||!result)return;detected=true;controlsRef.current?.stop();onDetectedRef.current(result.getText())});if(cancelled||detected){controls.stop();return}controlsRef.current=controls;const capabilities=controls.streamVideoCapabilitiesGet?.(((track:MediaStreamTrack)=>track.kind==="video") as never) as CameraCapabilities|undefined;if(capabilities?.focusMode?.includes("continuous")){try{await controls.streamVideoConstraintsApply?.({advanced:[{focusMode:"continuous"} as MediaTrackConstraintSet]})}catch{}}setTorchSupported(Boolean(capabilities?.torch&&controls.switchTorch));setStatus(capabilities?.focusMode?.includes("continuous")?"Enfoque continuo activo · apunta al código":"Apunta al QR o código de barras del boleto")}catch(reason){if(cancelled)return;const cameraError=reason as Error;if(cameraError.name==="OverconstrainedError"&&selectedDeviceId){localStorage.removeItem(PARKING_CAMERA_KEY);setSelectedDeviceId(null);return}setError(cameraError.name==="NotAllowedError"?"Permiso de cámara denegado. Habilítalo en la configuración del navegador.":cameraError.name==="NotFoundError"?"No se encontró una cámara disponible.":cameraError.name==="NotReadableError"?"La cámara está siendo usada por otra aplicación.":"No fue posible abrir la cámara. Verifica HTTPS, permisos e inténtalo nuevamente.");setStatus("")}}
-    void start();return()=>{cancelled=true;controlsRef.current?.stop();controlsRef.current=null}},[selectedDeviceId,retry]);
-  function selectCamera(deviceId:string){controlsRef.current?.stop();controlsRef.current=null;localStorage.setItem(PARKING_CAMERA_KEY,deviceId);setSelectedDeviceId(deviceId)}
-  async function toggleTorch(){if(!controlsRef.current?.switchTorch)return;try{const next=!torchOn;await controlsRef.current.switchTorch(next);setTorchOn(next)}catch{setTorchSupported(false)}}
-  return <div className="camera-scanner"><ModalHeader overline="LECTOR MÓVIL" title="Escanea el boleto" text="Lector homologado con Syntra POS: cámara trasera, enfoque continuo y selección de lente."/><div className="camera-viewport"><video ref={videoRef} playsInline muted/><span/><i/></div>{error?<div className="camera-error"><AlertTriangle size={17}/><span>{error}</span><button type="button" onClick={()=>setRetry(value=>value+1)}><RotateCcw size={14}/> Reintentar</button></div>:<p><ScanLine size={16}/>{status}</p>}<div className="camera-controls">{cameras.length>1&&<label><span>CÁMARA</span><select value={selectedDeviceId??""} onChange={event=>selectCamera(event.target.value)}>{cameras.map((camera,index)=><option key={camera.deviceId} value={camera.deviceId}>{cameraName(camera,index)}</option>)}</select></label>}{torchSupported&&<button type="button" className={torchOn?"active":""} onClick={()=>void toggleTorch()}>{torchOn?"Apagar luz":"Encender luz"}</button>}</div><small>Coloca el código dentro del marco a 15–25 cm. Si no enfoca, selecciona otro lente.</small></div>
-}
-
-function ModalHeader({overline,title,text}:{overline:string;title:string;text:string}){return <header className="modal-head"><p className="eyebrow">{overline}</p><h2>{title}</h2><p>{text}</p></header>}
-function MosaicModuleSection({title,subtitle,items,onSelect}:{title:string;subtitle:string;items:typeof nav;onSelect:(module:AppModule)=>void}){
-  const descriptions:Record<AppModule,string>={dashboard:"Indicadores clave y actividad reciente",entries:"Accesos, vehículos y cobros",vehicles:"Consulta de vehículos",shifts:"Turnos y puntos de cobro",cashCuts:"Conciliación de ventas y cobros",reports:"Analiza el rendimiento del estacionamiento",staff:"Accesos, roles y colaboradores",settings:"Tarifas, espacios y dispositivos"};
-  return <section className="pos-module-section"><header><div><h2>{title}</h2><p>{subtitle}</p></div><b>{items.length} {items.length===1?"módulo":"módulos"}</b></header><div className="pos-module-grid">{items.map(item=>{const Icon=item.icon;return <button key={item.id} onClick={()=>onSelect(item.id)}><span><Icon/></span><b>{item.label}<small>{descriptions[item.id]}</small></b><ChevronRight/></button>})}</div></section>
-}
-function StayList({stays,onOpen,canOperate=true}:{stays:ParkingStay[];onOpen:(s:ParkingStay)=>void;canOperate?:boolean}){return <div className="stay-list">{stays.map(s=>{const completed=s.status==="paid";return <button className={`stay ${completed?"completed":""}`} key={s.id} onClick={()=>!completed&&canOperate&&onOpen(s)} disabled={completed}><span className="vehicle-icon"><CarFront size={19}/></span><div><b>{s.plate}</b><small>{s.make} {s.model} · {s.color} · {s.folio}</small></div><p><small>Entrada</small><b>{clock.format(new Date(s.enteredAt))}</b></p><p><small>{completed?"Salida":"Estancia"}</small><b>{completed&&s.exitedAt?clock.format(new Date(s.exitedAt)):duration(s.enteredAt)}</b></p><span className="stay-state"><em className={s.status==="pending_payment"?"warning":completed?"completed":""}>● {s.status==="pending_payment"?"Por cobrar":completed?"Salida registrada":"Activo"}</em><strong>{completed?"Completado":canOperate?s.status==="pending_payment"?"Cobrar":"Procesar salida":"Solo consulta"}</strong></span>{!completed&&canOperate&&<ChevronRight className="row-chevron" size={18}/>}</button>})}{!stays.length&&<div className="empty">No hay movimientos para mostrar.</div>}</div>}
-function CashCuts({store}:{store:ReturnType<typeof useParkingStore>}){
-  const [period,setPeriod]=useState<"today"|"yesterday"|"7"|"30"|"custom">("today"),[from,setFrom]=useState(""),[to,setTo]=useState("");
-  const [page,setPage]=useState(1),[result,setResult]=useState<{rows:CashCut[];total:number;totalExpected:number;totalCounted:number}>({rows:[],total:0,totalExpected:0,totalCounted:0}),[loading,setLoading]=useState(true),[queryError,setQueryError]=useState("");
-  const nowDate=new Date(),startToday=new Date(nowDate.getFullYear(),nowDate.getMonth(),nowDate.getDate());
-  let start=startToday,end=new Date(startToday.getTime()+86400000);
-  if(period==="yesterday"){start=new Date(startToday.getTime()-86400000);end=startToday}
-  if(period==="7")start=new Date(startToday.getTime()-6*86400000);
-  if(period==="30")start=new Date(startToday.getTime()-29*86400000);
-  if(period==="custom"){if(from)start=new Date(`${from}T00:00:00`);if(to)end=new Date(new Date(`${to}T00:00:00`).getTime()+86400000)}
-  const rangeFrom=start.toISOString(),rangeTo=end.toISOString();
-  useEffect(()=>{let active=true;setLoading(true);setQueryError("");void store.queryCashCuts({from:rangeFrom,to:rangeTo,page,pageSize:5}).then(data=>{if(active)setResult(data)}).catch(error=>{if(active)setQueryError(error instanceof Error?error.message:"No fue posible consultar los cortes")}).finally(()=>{if(active)setLoading(false)});return()=>{active=false}},[period,from,to,page,store.lotId,store.source,rangeFrom,rangeTo]);
-  const rows=result.rows,totalExpected=result.totalExpected,totalCounted=result.totalCounted,difference=totalCounted-totalExpected,totalPages=Math.max(1,Math.ceil(result.total/5));
-  const dateTime=new Intl.DateTimeFormat("es-MX",{day:"2-digit",month:"short",year:"numeric",hour:"2-digit",minute:"2-digit"});
-  return <div className="screen cash-cuts-screen">
-    <section className="cash-cut-toolbar"><div className="cut-presets">{[["today","Hoy"],["yesterday","Ayer"],["7","7 días"],["30","30 días"],["custom","Personalizado"]].map(([value,label])=><button key={value} className={period===value?"active":""} onClick={()=>{setPeriod(value as typeof period);setPage(1)}}>{label}</button>)}</div>{period==="custom"&&<div className="custom-dates"><label>Desde<input type="date" value={from} onChange={e=>{setFrom(e.target.value);setPage(1)}}/></label><label>Hasta<input type="date" value={to} onChange={e=>{setTo(e.target.value);setPage(1)}}/></label></div>}</section>
-    <section className="stats three"><Stat label="Cortes realizados" value={loading?"…":String(result.total)} hint="En el periodo seleccionado" tone="blue" icon={CalendarRange}/><Stat label="Efectivo esperado" value={loading?"…":currency.format(totalExpected)} hint="Suma de todos los cortes" tone="green" icon={CircleDollarSign}/><Stat label="Diferencia acumulada" value={loading?"…":currency.format(difference)} hint={difference===0?"Cajas balanceadas":difference>0?"Sobrante acumulado":"Faltante acumulado"} tone="amber" icon={WalletCards}/></section>
-    {queryError&&<div className="cuts-query-error"><AlertTriangle/> {queryError}</div>}
-    <article className={`card table-card cuts-table ${loading?"loading":""}`}><div className="card-head"><div><p className="eyebrow">HISTORIAL DE CIERRES</p><h3>Detalle por usuario</h3></div><span>{result.total} {result.total===1?"corte":"cortes"}</span></div><table><thead><tr><th>Fecha de cierre</th><th>Usuario</th><th>Caja</th><th>Duración</th><th>Fondo inicial</th><th>Esperado</th><th>Contado</th><th>Diferencia</th></tr></thead><tbody>{rows.length?rows.map(cut=>{const register=store.cashRegisters.find(r=>r.id===cut.cashRegisterId),diff=cut.countedCash-cut.expectedCash,totalMinutes=Math.max(0,Math.round((new Date(cut.closedAt).getTime()-new Date(cut.openedAt).getTime())/60000));return <tr key={cut.id}><td data-label="Cierre"><b>{dateTime.format(new Date(cut.closedAt))}</b><small className="table-subtitle">Apertura: {dateTime.format(new Date(cut.openedAt))}</small></td><td data-label="Usuario"><b>{cut.closedBy}</b><small className="table-subtitle">Cerró el turno</small></td><td data-label="Caja">{register?.name??"Caja"}<small className="table-subtitle">{register?.code??"—"}</small></td><td data-label="Duración">{Math.floor(totalMinutes/60)} h {totalMinutes%60} min</td><td data-label="Fondo inicial">{currency.format(cut.openingCash)}</td><td data-label="Esperado">{currency.format(cut.expectedCash)}</td><td data-label="Contado"><b>{currency.format(cut.countedCash)}</b></td><td data-label="Diferencia"><em className={`cut-difference ${diff===0?"balanced":diff>0?"surplus":"shortage"}`}>{diff>0?"+":""}{currency.format(diff)}</em></td></tr>}):<tr className="cuts-empty-row"><td colSpan={8} className="empty">{loading?"Consultando cortes…":"No hay cortes de caja en el periodo seleccionado."}</td></tr>}</tbody></table>{result.total>5&&<nav className="cuts-pagination" aria-label="Paginación de cortes"><button disabled={page===1||loading} onClick={()=>setPage(value=>Math.max(1,value-1))}><ChevronLeft/> Anterior</button><span>Página <b>{page}</b> de {totalPages}</span><button disabled={page>=totalPages||loading} onClick={()=>setPage(value=>Math.min(totalPages,value+1))}>Siguiente <ChevronRight/></button></nav>}</article>
-  </div>
-}
-
-function Reports({store}:{store:ReturnType<typeof useParkingStore>}){
-  const [period,setPeriod]=useState<"today"|"yesterday"|"7"|"30"|"custom">("today"),[from,setFrom]=useState(""),[to,setTo]=useState(""),[refreshing,setRefreshing]=useState(true),[updatedAt,setUpdatedAt]=useState(new Date()),[report,setReport]=useState<{payments:Payment[];stays:ParkingStay[]}>({payments:[],stays:[]}),[queryError,setQueryError]=useState("");
-  const canExport=["owner","super_admin"].includes(store.profile.role)||store.profile.permissionCodes.includes("reports.export");
-  const now=new Date(),today=new Date(now.getFullYear(),now.getMonth(),now.getDate());let start=today,end=new Date(today.getTime()+86400000);
-  if(period==="yesterday"){start=new Date(today.getTime()-86400000);end=today}if(period==="7")start=new Date(today.getTime()-6*86400000);if(period==="30")start=new Date(today.getTime()-29*86400000);if(period==="custom"){if(from)start=new Date(`${from}T00:00:00`);if(to)end=new Date(new Date(`${to}T00:00:00`).getTime()+86400000)}
-  const rangeFrom=start.toISOString(),rangeTo=end.toISOString();
-  async function loadReport(){setRefreshing(true);setQueryError("");try{const data=await store.queryParkingReport({from:rangeFrom,to:rangeTo});setReport(data);setUpdatedAt(new Date())}catch(error){setQueryError(error instanceof Error?error.message:"No fue posible consultar el reporte")}finally{setRefreshing(false)}}
-  useEffect(()=>{let active=true;setRefreshing(true);setQueryError("");void store.queryParkingReport({from:rangeFrom,to:rangeTo}).then(data=>{if(active){setReport(data);setUpdatedAt(new Date())}}).catch(error=>{if(active)setQueryError(error instanceof Error?error.message:"No fue posible consultar el reporte")}).finally(()=>{if(active)setRefreshing(false)});return()=>{active=false}},[period,from,to,store.lotId,store.source,rangeFrom,rangeTo]);
-  const rows=report.payments;
-  const income=rows.reduce((sum,p)=>sum+p.amount,0),durationMs=Math.max(1,end.getTime()-start.getTime()),dayCount=Math.ceil(durationMs/86400000),bucketCount=dayCount<=1?12:Math.min(dayCount,14),bucketMs=durationMs/bucketCount;
-  const buckets=Array.from({length:bucketCount},(_,index)=>{const bucketStart=new Date(start.getTime()+index*bucketMs),bucketEnd=new Date(start.getTime()+(index+1)*bucketMs),amount=rows.filter(p=>{const date=new Date(p.paidAt);return date>=bucketStart&&date<bucketEnd}).reduce((sum,p)=>sum+p.amount,0);return{label:dayCount<=1?`${String(bucketStart.getHours()).padStart(2,"0")}:00`:new Intl.DateTimeFormat("es-MX",{day:"2-digit",month:"short"}).format(bucketStart),amount}}),maxBucket=Math.max(...buckets.map(b=>b.amount),1);
-  const lotStays=report.stays,events:{at:number;delta:number}[]=[],initial=lotStays.filter(s=>new Date(s.enteredAt)<start&&(!s.exitedAt||new Date(s.exitedAt)>=start)).length;
-  lotStays.forEach(s=>{const entered=new Date(s.enteredAt).getTime(),exited=s.exitedAt?new Date(s.exitedAt).getTime():null;if(entered>=start.getTime()&&entered<end.getTime())events.push({at:entered,delta:1});if(exited&&exited>=start.getTime()&&exited<end.getTime())events.push({at:exited,delta:-1})});events.sort((a,b)=>a.at-b.at);let occupancy=initial,maxOccupancy=initial;events.forEach(event=>{occupancy+=event.delta;maxOccupancy=Math.max(maxOccupancy,occupancy)});const occupancyPercent=store.lot.capacity?Math.round(maxOccupancy/store.lot.capacity*100):0;
-  function exportCsv(){const lines=[["Fecha","Folio","Método","Importe"],...rows.map(p=>[new Date(p.paidAt).toLocaleString("es-MX"),report.stays.find(s=>s.id===p.stayId)?.folio??"",p.method,String(p.amount)])];const blob=new Blob(["\ufeff"+lines.map(line=>line.map(value=>`"${String(value).replaceAll('"','""')}"`).join(",")).join("\n")],{type:"text/csv;charset=utf-8"}),url=URL.createObjectURL(blob),link=document.createElement("a");link.href=url;link.download=`reporte-${store.lot.code}-${from||period}.csv`;link.click();URL.revokeObjectURL(url)}
-  return <div className="screen reports-screen"><section className="report-toolbar"><div className="cut-presets">{[["today","Hoy"],["yesterday","Ayer"],["7","7 días"],["30","30 días"],["custom","Personalizado"]].map(([value,label])=><button key={value} className={period===value?"active":""} onClick={()=>setPeriod(value as typeof period)}>{label}</button>)}</div>{period==="custom"&&<div className="custom-dates"><label>Desde<input type="date" value={from} onChange={e=>setFrom(e.target.value)}/></label><label>Hasta<input type="date" value={to} onChange={e=>setTo(e.target.value)}/></label></div>}<div className="report-actions"><small><i/> Última consulta · {clock.format(updatedAt)}</small><button className="secondary" onClick={()=>void loadReport()} disabled={refreshing}>{refreshing?"Actualizando…":"↻ Actualizar"}</button>{canExport&&<button className="secondary" onClick={exportCsv} disabled={!rows.length||refreshing}>↓ Exportar CSV</button>}</div></section>{queryError&&<div className="cuts-query-error"><AlertTriangle/> {queryError}</div>}<section className="report-kpi-grid"><article className="income"><span><CircleDollarSign/></span><div><small>INGRESOS</small><strong>{refreshing?"…":currency.format(income)}</strong><p>Pagos confirmados</p></div></article><article className="tickets"><span><TicketCheck/></span><div><small>BOLETOS COBRADOS</small><strong>{refreshing?"…":String(rows.length)}</strong><p>Operaciones completadas</p></div></article><article className="occupancy"><span><ParkingCircle/></span><div><small>OCUPACIÓN MÁXIMA</small><strong>{refreshing?"…":`${occupancyPercent}%`}</strong><p>{maxOccupancy} de {store.lot.capacity} espacios</p></div></article></section><article className={`card chart report-chart ${refreshing?"loading":""}`}><div className="card-head"><div><p className="eyebrow">INGRESOS DEL PERIODO</p><h3>Comportamiento de ingresos</h3></div><b>{refreshing?"…":currency.format(income)}</b></div><div className="bars">{buckets.map((bucket,index)=><div key={`${bucket.label}-${index}`} title={`${bucket.label}: ${currency.format(bucket.amount)}`}><b>{bucket.amount?currency.format(bucket.amount):""}</b><span style={{height:`${Math.max(bucket.amount/maxBucket*100,bucket.amount?6:1)}%`}}/><small>{bucket.label}</small></div>)}</div>{!refreshing&&!rows.length&&<p className="report-empty">No hay cobros registrados en el periodo seleccionado.</p>}</article></div>
-}
-
-function PlatformBusinessDashboard({store}:{store:ReturnType<typeof useParkingStore>}){
-  type PlatformBusiness=(typeof store.platformBusinesses)[number];
-  const [platformModule,setPlatformModule]=useState<"overview"|"businesses"|"finances">("overview"),[financePeriod,setFinancePeriod]=useState<"30"|"90"|"year"|"all">("30"),[financeQuery,setFinanceQuery]=useState("");
-  const [query,setQuery]=useState(""),[opening,setOpening]=useState(""),[selectedId,setSelectedId]=useState(""),[dialog,setDialog]=useState<"detail"|"payment"|"suspend"|"reactivate"|"delete">("detail"),[saving,setSaving]=useState(false),[formError,setFormError]=useState("");
-  const [planType,setPlanType]=useState<"demo"|"monthly"|"annual">("demo"),[durationDays,setDurationDays]=useState(15),[maxLots,setMaxLots]=useState(1),[planPrice,setPlanPrice]=useState(0),[suspensionType,setSuspensionType]=useState<"temporary"|"permanent">("temporary"),[reason,setReason]=useState(""),[confirmation,setConfirmation]=useState("");
-  const today=new Date().toISOString().slice(0,10),monthEnd=new Date(new Date().setMonth(new Date().getMonth()+1)).toISOString().slice(0,10);
-  const [paymentAmount,setPaymentAmount]=useState(0),[periodStart,setPeriodStart]=useState(today),[periodEnd,setPeriodEnd]=useState(monthEnd),[paymentMethod,setPaymentMethod]=useState("transfer"),[paymentReference,setPaymentReference]=useState(""),[paymentNotes,setPaymentNotes]=useState("");
-  const businesses=store.platformBusinesses.filter(b=>`${b.name} ${b.slug} ${b.ownerName} ${b.planType}`.toLowerCase().includes(query.toLowerCase()));
-  const selected=store.platformBusinesses.find(b=>b.id===selectedId)??null;
-  const activeBusinesses=store.platformBusinesses.filter(b=>b.active).length;
-  const paidPlans=store.platformBusinesses.filter(b=>b.planType!=="demo").length;
-  const financeStart=financePeriod==="all"?0:(()=>{const date=new Date();if(financePeriod==="year")date.setMonth(0,1);else date.setDate(date.getDate()-Number(financePeriod));date.setHours(0,0,0,0);return date.getTime()})();
-  const financeRows=store.platformSubscriptionPayments.filter(payment=>{const business=store.platformBusinesses.find(item=>item.id===payment.businessId),text=`${business?.name??""} ${business?.ownerName??""} ${payment.reference??""} ${payment.paymentMethod}`.toLowerCase();return new Date(payment.paidAt).getTime()>=financeStart&&text.includes(financeQuery.toLowerCase())});
-  const financeTotal=financeRows.reduce((total,payment)=>total+payment.amount,0),annualIncome=financeRows.filter(payment=>payment.planType==="annual").reduce((total,payment)=>total+payment.amount,0),monthlyIncome=financeRows.filter(payment=>payment.planType==="monthly").reduce((total,payment)=>total+payment.amount,0);
-  const planLabel=(type:string)=>type==="annual"?"Plan anual":type==="monthly"?"Plan mensual":"Demostración";
-  const planStatus=(expiresAt:string|null)=>{if(!expiresAt)return"Sin vencimiento";const days=Math.ceil((new Date(expiresAt).getTime()-Date.now())/86400000);return days<0?"Plan vencido":days===0?"Vence hoy":`${days} días restantes`};
-  const openBusiness=async(id:string)=>{setOpening(id);try{await store.selectPlatformBusiness(id)}finally{setOpening("")}};
-  function openDetail(business:PlatformBusiness){const remaining=business.planExpiresAt?Math.max(1,Math.ceil((new Date(business.planExpiresAt).getTime()-Date.now())/86400000)):business.planType==="annual"?365:business.planType==="monthly"?30:15;setSelectedId(business.id);setPlanType(business.planType);setDurationDays(remaining);setMaxLots(business.maxLots);setPlanPrice(business.planPrice??0);setPaymentAmount(business.planPrice??0);setSuspensionType("temporary");setReason("");setConfirmation("");setFormError("");setDialog("detail")}
-  function closeDetail(){if(saving)return;setSelectedId("");setFormError("");setConfirmation("")}
-  async function savePlan(e:FormEvent){e.preventDefault();if(!selected)return;setSaving(true);setFormError("");try{await store.updatePlatformBusinessPlan({businessId:selected.id,planType,durationDays,maxLots,planPrice})}catch(error){setFormError(error instanceof Error?error.message:"No fue posible actualizar el plan")}finally{setSaving(false)}}
-  async function recordPayment(e:FormEvent){e.preventDefault();if(!selected)return;setSaving(true);setFormError("");try{await store.recordPlatformSubscriptionPayment({businessId:selected.id,amount:paymentAmount,periodStart,periodEnd,paymentMethod,reference:paymentReference,notes:paymentNotes});setPaymentReference("");setPaymentNotes("");setDialog("detail")}catch(error){setFormError(error instanceof Error?error.message:"No fue posible registrar el pago")}finally{setSaving(false)}}
-  async function suspendBusiness(e:FormEvent){e.preventDefault();if(!selected)return;setSaving(true);setFormError("");try{await store.setPlatformBusinessActive({businessId:selected.id,active:false,suspensionType,reason});setDialog("detail");setReason("")}catch(error){setFormError(error instanceof Error?error.message:"No fue posible suspender la empresa")}finally{setSaving(false)}}
-  async function reactivateBusiness(){if(!selected)return;setSaving(true);setFormError("");try{await store.setPlatformBusinessActive({businessId:selected.id,active:true});setDialog("detail")}catch(error){setFormError(error instanceof Error?error.message:"No fue posible reactivar la empresa")}finally{setSaving(false)}}
-  async function removeBusiness(e:FormEvent){e.preventDefault();if(!selected)return;setSaving(true);setFormError("");try{await store.deletePlatformBusiness({businessId:selected.id,confirmation});setSelectedId("");setConfirmation("")}catch(error){setFormError(error instanceof Error?error.message:"No fue posible eliminar la empresa")}finally{setSaving(false)}}
-  function exportPlatformPayments(){const lines=[["Fecha","Empresa","Propietario","Plan","Periodo inicial","Periodo final","Método","Referencia","Importe","Notas"],...financeRows.map(payment=>{const business=store.platformBusinesses.find(item=>item.id===payment.businessId);return[new Date(payment.paidAt).toLocaleString("es-MX"),business?.name??"Empresa eliminada",business?.ownerName??"",payment.planType==="annual"?"Anual":"Mensual",payment.periodStart,payment.periodEnd,payment.paymentMethod,payment.reference??"",String(payment.amount),payment.notes??""]})],blob=new Blob(["\ufeff"+lines.map(row=>row.map(value=>`"${String(value).replaceAll('"','""')}"`).join(",")).join("\n")],{type:"text/csv;charset=utf-8"}),url=URL.createObjectURL(blob),link=document.createElement("a");link.href=url;link.download=`finanzas-parkflow-${new Date().toISOString().slice(0,10)}.csv`;link.click();URL.revokeObjectURL(url)}
-  return <main className="platform-dashboard">
-    <header className="platform-dashboard-header"><Brand/><div className="platform-header-session"><div className="platform-header-user"><span>{store.profile.fullName.split(" ").map(v=>v[0]).join("").slice(0,2)}</span><div><small><i/> Sesión activa</small><b>{store.profile.fullName}</b></div></div><span className="platform-role"><ShieldCheck size={14}/> Super administración</span><button className="platform-signout" onClick={()=>void store.signOut()}><LogOut size={16}/><span>Cerrar sesión</span></button></div></header>
-    <div className="platform-admin-shell"><aside className="platform-admin-nav"><div><p>ADMINISTRACIÓN</p><button className={platformModule==="overview"?"active":""} onClick={()=>setPlatformModule("overview")}><LayoutDashboard/><span>Resumen</span></button><button className={platformModule==="businesses"?"active":""} onClick={()=>setPlatformModule("businesses")}><Building2/><span>Negocios</span><em>{store.platformBusinesses.length}</em></button><button className={platformModule==="finances"?"active":""} onClick={()=>setPlatformModule("finances")}><CircleDollarSign/><span>Finanzas</span></button></div><article><b>Panel modular</b><p>Preparado para agregar nuevos módulos sin saturar la operación principal.</p></article></aside>
-      <section className="platform-dashboard-content"><div className="platform-welcome"><div><p className="eyebrow">CONTROL GLOBAL DE SYNTRA PARKFLOW</p></div></div>
-        {platformModule==="overview"&&<><section className="platform-overview"><article><span><Building2/></span><div><small>Empresas registradas</small><b>{store.platformBusinesses.length}</b><p>{activeBusinesses} activas</p></div></article><article><span><CircleDollarSign/></span><div><small>Planes contratados</small><b>{paidPlans}</b><p>{store.platformBusinesses.length-paidPlans} en demostración</p></div></article><article><span><ParkingCircle/></span><div><small>Sucursales operativas</small><b>{store.platformLots.length}</b><p>En toda la plataforma</p></div></article><article><span><Users/></span><div><small>Usuarios registrados</small><b>{store.staff.length}</b><p>Propietarios y colaboradores</p></div></article></section><section className="platform-module-launchers"><button onClick={()=>setPlatformModule("businesses")}><span><Building2/></span><div><b>Administrar negocios</b><small>Planes, propietarios, sucursales y acceso</small></div><ChevronRight/></button><button onClick={()=>setPlatformModule("finances")}><span><CircleDollarSign/></span><div><b>Consultar finanzas</b><small>{store.platformSubscriptionPayments.length} pagos registrados</small></div><ChevronRight/></button></section></>}
-        {platformModule==="businesses"&&<section className="platform-directory"><header><div><p className="eyebrow">DIRECTORIO DE CLIENTES</p><h2>Empresas de la plataforma</h2></div><label><Search size={17}/><input value={query} onChange={e=>setQuery(e.target.value)} placeholder="Buscar empresa o propietario…"/></label></header><div className="platform-business-grid">{businesses.map(business=>{const lots=store.platformLots.filter(l=>l.businessId===business.id),members=store.staff.filter(user=>user.lotIds.some(id=>lots.some(l=>l.id===id))),expired=Boolean(business.planExpiresAt&&new Date(business.planExpiresAt).getTime()<Date.now());return <article key={business.id}><div className="platform-business-icon">{business.name.split(" ").map(v=>v[0]).join("").slice(0,2)}</div><div className="platform-business-copy"><small>{business.slug}</small><h3>{business.name}</h3></div><div className="platform-business-status"><em className={business.active?"active":"inactive"}><i/>{business.active?"Activa":"Suspendida"}</em><span className={business.planType}>{business.planType==="annual"?"Plan anual":business.planType==="monthly"?"Plan mensual":"Demostración"}</span></div><div className="platform-business-details"><span><i><Users size={15}/></i><b>Propietario<small>{business.ownerName}</small></b></span><span><i><CircleDollarSign size={15}/></i><b>Plan actual<small className={expired?"expired":""}>{planLabel(business.planType)} · {planStatus(business.planExpiresAt)}{business.planType!=="demo"?` · ${currency.format(business.planPrice??0)}`:""}</small></b></span><span><i><ParkingCircle size={15}/></i><b>Sucursales<small>{lots.length} de {business.maxLots} autorizadas · {members.length} usuarios</small></b></span></div><div className="platform-card-actions"><button className="secondary" onClick={()=>openDetail(business)}><Settings2 size={15}/> Configurar</button><button className="primary" disabled={opening===business.id||!business.active} onClick={()=>void openBusiness(business.id)}>{opening===business.id?"Cargando…":"Acceder a la empresa"}<ChevronRight size={16}/></button></div></article>})}{!businesses.length&&<div className="platform-no-results"><Building2/><b>No encontramos empresas</b><p>Prueba con otro nombre, propietario o identificador.</p></div>}</div></section>}
-        {platformModule==="finances"&&<section className="platform-finances"><div className="platform-finance-stats"><article><small>Ingresos del periodo</small><b>{currency.format(financeTotal)}</b><p>{financeRows.length} pagos confirmados</p></article><article><small>Planes mensuales</small><b>{currency.format(monthlyIncome)}</b><p>{financeRows.filter(payment=>payment.planType==="monthly").length} movimientos</p></article><article><small>Planes anuales</small><b>{currency.format(annualIncome)}</b><p>{financeRows.filter(payment=>payment.planType==="annual").length} movimientos</p></article></div><div className="platform-finance-table"><header><div><p className="eyebrow">CONTROL DE INGRESOS</p><h2>Pagos de suscripciones</h2></div><div className="platform-finance-actions"><div className="cut-presets">{[["30","30 días"],["90","90 días"],["year","Este año"],["all","Todo"]].map(([value,label])=><button key={value} className={financePeriod===value?"active":""} onClick={()=>setFinancePeriod(value as typeof financePeriod)}>{label}</button>)}</div><label><Search/><input value={financeQuery} onChange={event=>setFinanceQuery(event.target.value)} placeholder="Empresa, propietario o referencia"/></label><button className="secondary" disabled={!financeRows.length} onClick={exportPlatformPayments}>↓ Exportar CSV</button></div></header><div className="platform-finance-scroll"><table><thead><tr><th>Fecha</th><th>Empresa</th><th>Plan</th><th>Periodo cubierto</th><th>Método / referencia</th><th>Importe</th></tr></thead><tbody>{financeRows.map(payment=>{const business=store.platformBusinesses.find(item=>item.id===payment.businessId);return <tr key={payment.id}><td><b>{new Date(payment.paidAt).toLocaleDateString("es-MX")}</b><small>{clock.format(new Date(payment.paidAt))}</small></td><td><b>{business?.name??"Empresa eliminada"}</b><small>{business?.ownerName??"Sin propietario"}</small></td><td><span className={`finance-plan ${payment.planType}`}>{payment.planType==="annual"?"Anual":"Mensual"}</span></td><td><b>{new Date(`${payment.periodStart}T12:00:00`).toLocaleDateString("es-MX")} — {new Date(`${payment.periodEnd}T12:00:00`).toLocaleDateString("es-MX")}</b><small>{payment.notes||"Sin observaciones"}</small></td><td><b>{payment.paymentMethod}</b><small>{payment.reference||"Sin referencia"}</small></td><td className="amount">{currency.format(payment.amount)}</td></tr>})}</tbody></table>{!financeRows.length&&<div className="platform-finance-empty"><CircleDollarSign/><b>No hay pagos en este periodo</b><p>Cambia el filtro o registra pagos desde el detalle de cada negocio.</p></div>}</div></div></section>}
-      </section>
-    </div>
-    {selected&&<div className="backdrop platform-company-backdrop" onMouseDown={closeDetail}><section className={`platform-company-modal ${dialog}`} role="dialog" aria-modal="true" aria-labelledby="platform-company-title" onMouseDown={e=>e.stopPropagation()}><button className="close" onClick={closeDetail} aria-label="Cerrar">×</button>
-      {dialog==="detail"&&<>
-        <header className="platform-company-heading"><div className="platform-company-mark">{selected.name.split(" ").map(v=>v[0]).join("").slice(0,2)}</div><div><p className="eyebrow">DETALLE DE LA EMPRESA</p><h2 id="platform-company-title">{selected.name}</h2><div className="company-contract-state"><span className={selected.active?"company-live":"company-paused"}><i/>{selected.active?"Operando":"Acceso suspendido"}</span><strong className={selected.planType}>{planLabel(selected.planType)}</strong><small>{selected.planType==="demo"?"Sin contratación":`${currency.format(selected.planPrice??0)} ${selected.planType==="annual"?"al año":"al mes"}`}</small></div></div></header>
-        <div className="platform-company-body"><section className="platform-company-information"><h3>Datos del negocio</h3><dl><div><dt>Identificador</dt><dd>{selected.slug}</dd></div><div><dt>Propietario</dt><dd>{selected.ownerName}</dd></div><div><dt>Sucursales</dt><dd>{store.platformLots.filter(l=>l.businessId===selected.id).length} activas de {selected.maxLots} autorizadas</dd></div><div><dt>Estado de acceso</dt><dd>{selected.active?"Todos los usuarios pueden ingresar":selected.suspensionReason||"Acceso bloqueado"}</dd></div></dl></section>
-          <form className="platform-plan-form" onSubmit={savePlan}><div className="platform-plan-title"><span><CreditCard size={20}/></span><div><h3>Plan y vigencia</h3><p>{planLabel(selected.planType)} · {planStatus(selected.planExpiresAt)}</p></div></div><label>Plan asignado<select value={planType} onChange={e=>{const value=e.target.value as typeof planType;setPlanType(value);setDurationDays(value==="annual"?365:value==="monthly"?30:15)}}><option value="demo">Demostración</option><option value="monthly">Mensual</option><option value="annual">Anual</option></select></label><div className="platform-plan-grid"><label>Costo contratado (MXN)<input type="number" min={0} step="0.01" value={planPrice} onChange={e=>setPlanPrice(Number(e.target.value))}/></label><label>Vigencia en días<input type="number" min={1} max={3650} value={durationDays} onChange={e=>setDurationDays(Number(e.target.value))}/></label><label>Sucursales autorizadas<input type="number" min={1} max={999} value={maxLots} onChange={e=>setMaxLots(Number(e.target.value))}/></label></div><small>El costo representa el importe mensual o anual acordado. La vigencia se contará desde que guardes.</small><button className="primary" disabled={saving}>{saving?"Guardando…":"Confirmar y actualizar plan"}</button></form>
-          <section className="platform-payment-history"><header><div><p className="eyebrow">HISTORIAL COMERCIAL</p><h3>Pagos de la suscripción</h3></div><button disabled={selected.planType==="demo"} onClick={()=>{setPaymentAmount(selected.planPrice??0);setDialog("payment");setFormError("")}}><Plus size={15}/> Registrar pago</button></header><div>{store.platformSubscriptionPayments.filter(payment=>payment.businessId===selected.id).slice(0,8).map(payment=><article key={payment.id}><span><CreditCard size={16}/></span><div><b>{currency.format(payment.amount)}</b><small>{new Date(payment.paidAt).toLocaleDateString("es-MX")} · {payment.paymentMethod}</small></div><p><b>{payment.planType==="annual"?"Anual":"Mensual"}</b><small>{payment.periodStart} — {payment.periodEnd}</small></p><em>{payment.reference||"Sin referencia"}</em></article>)}{!store.platformSubscriptionPayments.some(payment=>payment.businessId===selected.id)&&<p className="platform-empty-payments">Aún no hay pagos registrados para esta empresa.</p>}</div></section>
-        </div>{formError&&<p className="platform-form-error">{formError}</p>}<footer className="platform-company-actions"><button className="danger-link" onClick={()=>{setDialog("delete");setFormError("")}}><Trash2 size={16}/> Eliminar</button>{selected.active?<button className="warning" onClick={()=>{setDialog("suspend");setFormError("")}}><AlertTriangle size={16}/> Suspender acceso</button>:<button className="reactivate" onClick={()=>{setDialog("reactivate");setFormError("")}}><RotateCcw size={16}/> Reactivar empresa</button>}<button className="primary" disabled={!selected.active||opening===selected.id} onClick={()=>void openBusiness(selected.id)}>Entrar al negocio <ChevronRight size={16}/></button></footer>
-      </>}
-      {dialog==="payment"&&<form className="platform-confirm-form platform-payment-form" onSubmit={recordPayment}><span className="platform-success-icon"><CreditCard/></span><p className="eyebrow">SUSCRIPCIÓN</p><h2 id="platform-company-title">Registrar pago</h2><p>Captura el pago de <b>{selected.name}</b> para conservar el historial y actualizar su vigencia.</p><div className="platform-plan-grid"><label>Importe pagado<input type="number" min={0.01} step="0.01" value={paymentAmount} onChange={e=>setPaymentAmount(Number(e.target.value))} required/></label><label>Método<select value={paymentMethod} onChange={e=>setPaymentMethod(e.target.value)}><option value="transfer">Transferencia</option><option value="cash">Efectivo</option><option value="card">Tarjeta</option><option value="deposit">Depósito</option></select></label><label>Inicio del periodo<input type="date" value={periodStart} onChange={e=>setPeriodStart(e.target.value)} required/></label><label>Fin del periodo<input type="date" value={periodEnd} min={periodStart} onChange={e=>setPeriodEnd(e.target.value)} required/></label></div><label>Referencia<input value={paymentReference} onChange={e=>setPaymentReference(e.target.value)} placeholder="Folio, transferencia o recibo"/></label><label>Notas<textarea value={paymentNotes} onChange={e=>setPaymentNotes(e.target.value)} placeholder="Observaciones opcionales"/></label>{formError&&<p className="platform-form-error">{formError}</p>}<footer><button type="button" className="secondary" onClick={()=>setDialog("detail")}>Cancelar</button><button className="reactivate" disabled={saving||paymentAmount<=0||periodEnd<periodStart}>{saving?"Registrando…":"Confirmar pago"}</button></footer></form>}
-      {dialog==="suspend"&&<form className="platform-confirm-form" onSubmit={suspendBusiness}><span className="platform-warning-icon"><AlertTriangle/></span><p className="eyebrow">CONTROL DE ACCESO</p><h2 id="platform-company-title">Suspender empresa</h2><p>Se bloqueará inmediatamente el acceso de todos los usuarios de <b>{selected.name}</b>, sin eliminar su información.</p><fieldset><legend>Tipo de suspensión</legend><div className="platform-choice"><label className={suspensionType==="temporary"?"active":""}><input type="radio" name="suspension" value="temporary" checked={suspensionType==="temporary"} onChange={()=>setSuspensionType("temporary")}/><b>Temporal</b><small>Podrás reactivar la empresa después.</small></label><label className={suspensionType==="permanent"?"active":""}><input type="radio" name="suspension" value="permanent" checked={suspensionType==="permanent"} onChange={()=>setSuspensionType("permanent")}/><b>Permanente</b><small>Conserva los datos, pero bloquea el acceso.</small></label></div></fieldset><label>Motivo<textarea value={reason} onChange={e=>setReason(e.target.value)} placeholder="Ej. Pago pendiente del servicio" required minLength={5}/></label>{formError&&<p className="platform-form-error">{formError}</p>}<footer><button type="button" className="secondary" onClick={()=>setDialog("detail")}>Cancelar</button><button className="danger" disabled={saving||reason.trim().length<5}>{saving?"Suspendiendo…":"Confirmar suspensión"}</button></footer></form>}
-      {dialog==="reactivate"&&<div className="platform-confirm-form"><span className="platform-success-icon"><RotateCcw/></span><p className="eyebrow">REACTIVAR ACCESO</p><h2 id="platform-company-title">Reactivar {selected.name}</h2><p>Los usuarios de esta empresa podrán volver a iniciar sesión y consultar sus módulos asignados.</p><div className="platform-confirm-note"><CheckCircle2/><span><b>La información se conserva</b><small>La operación continuará con el plan y vigencia actuales.</small></span></div>{formError&&<p className="platform-form-error">{formError}</p>}<footer><button className="secondary" onClick={()=>setDialog("detail")}>Cancelar</button><button className="reactivate" disabled={saving} onClick={()=>void reactivateBusiness()}>{saving?"Reactivando…":"Confirmar reactivación"}</button></footer></div>}
-      {dialog==="delete"&&<form className="platform-confirm-form delete" onSubmit={removeBusiness}><span className="platform-danger-icon"><Trash2/></span><p className="eyebrow">ACCIÓN IRREVERSIBLE</p><h2 id="platform-company-title">Eliminar empresa</h2><p>Se eliminarán de ParkFlow las sucursales, vehículos, estancias, cobros, cajas, turnos, tarifas y membresías de <b>{selected.name}</b>. Las identidades de acceso compartidas no se borrarán.</p><div className="platform-delete-warning"><AlertTriangle/><span><b>Esta acción no se puede deshacer</b><small>Escribe el nombre exacto de la empresa para confirmar.</small></span></div><label>Escribe “{selected.name}”<input value={confirmation} onChange={e=>setConfirmation(e.target.value)} autoComplete="off" placeholder={selected.name}/></label>{formError&&<p className="platform-form-error">{formError}</p>}<footer><button type="button" className="secondary" onClick={()=>setDialog("detail")}>Cancelar</button><button className="danger" disabled={saving||confirmation!==selected.name}>{saving?"Eliminando…":"Eliminar definitivamente"}</button></footer></form>}
-    </section></div>}
-  </main>
-}
-
-function PlatformAdminPanel({store,notify}:{store:ReturnType<typeof useParkingStore>;notify:(v:string)=>void}){
-  const [open,setOpen]=useState(false),[step,setStep]=useState(1),[saving,setSaving]=useState(false);
-  const [name,setName]=useState(""),[slug,setSlug]=useState(""),[lotName,setLotName]=useState(""),[lotCode,setLotCode]=useState(""),[capacity,setCapacity]=useState(100);
-  const [ownerName,setOwnerName]=useState(""),[ownerEmail,setOwnerEmail]=useState(""),[ownerPassword,setOwnerPassword]=useState(""),[confirmPassword,setConfirmPassword]=useState("");
-  const businesses=Array.from(new Map(store.lots.map(l=>[l.businessId,l])).values());
-  function close(){setOpen(false);setStep(1)}
-  async function create(e:FormEvent){e.preventDefault();if(ownerPassword!==confirmPassword){notify("Las contraseñas no coinciden");return}setSaving(true);try{await store.createBusiness({name,slug,lotName,lotCode,capacity,ownerName,ownerEmail,ownerPassword});close();notify("Empresa y propietario creados correctamente")}catch(error){notify(error instanceof Error?error.message:"No fue posible crear la empresa")}finally{setSaving(false)}}
-  return <div className="screen platform-screen">
-    <section className="intro compact"><div><p className="eyebrow">CLIENTES DE LA PLATAFORMA</p><h2>Empresas</h2><p>Da de alta cada empresa junto con su sucursal inicial y usuario responsable.</p></div><button className="primary" onClick={()=>setOpen(true)}><Plus size={17}/> Nueva empresa</button></section>
-    <section className="platform-stats"><article><Building2/><div><small>Empresas registradas</small><b>{businesses.length}</b></div></article><article><ParkingCircle/><div><small>Sucursales activas</small><b>{store.lots.length}</b></div></article><article><ShieldCheck/><div><small>Modelo de acceso</small><b>Administrado por cliente</b></div></article></section>
-    {businesses.length?<section className="business-cards">{businesses.map(b=><article className="card" key={b.businessId}><span><Building2/></span><div><small>EMPRESA CLIENTE</small><h3>{b.name.replace(/Sucursal|Estacionamiento/gi,"").trim()||b.name}</h3><p>{store.lots.filter(l=>l.businessId===b.businessId).length} sucursal(es) · {store.lots.filter(l=>l.businessId===b.businessId).reduce((a,l)=>a+l.capacity,0)} espacios</p></div><button>Administrar <ChevronRight size={16}/></button></article>)}</section>:<section className="card platform-empty"><span><Building2/></span><h3>Aún no hay empresas registradas</h3><p>Crea el primer cliente junto con su cuenta de propietario y contraseña de acceso.</p><button className="primary" onClick={()=>setOpen(true)}>Crear primera empresa</button></section>}
-    {open&&<div className="backdrop" onMouseDown={close}><section className="modal business-wizard" role="dialog" aria-modal="true" onMouseDown={e=>e.stopPropagation()}><button className="close" onClick={close}>×</button><header><p className="eyebrow">ALTA DE CLIENTE</p><h2>Nueva empresa</h2><p>La empresa, sucursal y propietario se crearán en una sola operación.</p></header><div className="wizard-progress">{[[1,"Empresa"],[2,"Sucursal"],[3,"Propietario"]].map(([n,label])=><div key={n} className={step>=Number(n)?"active":""}><span>{step>Number(n)?<CheckCircle2/>:n}</span><b>{label}</b></div>)}</div><form onSubmit={create}>
-      {step===1&&<div className="wizard-section"><div className="section-heading"><span><Building2/></span><div><h3>Información de la empresa</h3><p>Datos del cliente que contratará ParkFlow.</p></div></div><label>Nombre comercial<input autoFocus value={name} onChange={e=>{const value=e.target.value;setName(value);setSlug(value.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g,"").replace(/[^a-z0-9]+/g,"-").replace(/^-|-$/g,""))}} placeholder="Ej. Estacionamientos del Centro" required/></label><label>Identificador del sistema<input value={slug} onChange={e=>setSlug(e.target.value)} placeholder="estacionamientos-del-centro" required/><small>Se utiliza internamente para identificar al negocio.</small></label></div>}
-      {step===2&&<div className="wizard-section"><div className="section-heading"><span><ParkingCircle/></span><div><h3>Primera sucursal</h3><p>El propietario podrá crear más sucursales posteriormente.</p></div></div><div className="form-grid"><label>Nombre de sucursal<input autoFocus value={lotName} onChange={e=>setLotName(e.target.value)} placeholder="Sucursal Centro" required/></label><label>Código<input value={lotCode} onChange={e=>setLotCode(e.target.value.toUpperCase())} placeholder="CTR" maxLength={8} required/></label></div><label>Capacidad total<input type="number" min={1} value={capacity} onChange={e=>setCapacity(Number(e.target.value))} required/><small>Número de espacios disponibles en esta ubicación.</small></label></div>}
-      {step===3&&<div className="wizard-section"><div className="section-heading"><span><ShieldCheck/></span><div><h3>Propietario de la empresa</h3><p>Su cuenta quedará activa de inmediato y podrá iniciar sesión con su contraseña.</p></div></div><div className="owner-role-card"><ShieldCheck/><span><b>Propietario</b><small>Control completo del negocio, sucursales y usuarios.</small></span></div><div className="form-grid"><label>Nombre completo<input autoFocus value={ownerName} onChange={e=>setOwnerName(e.target.value)} placeholder="Nombre del propietario" autoComplete="name" required/></label><label>Correo electrónico<input type="email" value={ownerEmail} onChange={e=>setOwnerEmail(e.target.value)} placeholder="propietario@empresa.com" autoComplete="email" required/></label><label>Contraseña<input type="password" value={ownerPassword} onChange={e=>setOwnerPassword(e.target.value)} placeholder="Mínimo 8 caracteres" minLength={8} autoComplete="new-password" required/><small>Será su contraseña para ingresar a ParkFlow.</small></label><label>Confirmar contraseña<input type="password" value={confirmPassword} onChange={e=>setConfirmPassword(e.target.value)} placeholder="Repite la contraseña" minLength={8} autoComplete="new-password" required/>{confirmPassword&&ownerPassword!==confirmPassword&&<small className="field-error">Las contraseñas no coinciden.</small>}</label></div><div className="creation-summary"><CheckCircle2/><p>Se crearán la empresa, la primera sucursal, la caja principal, la tarifa inicial y la cuenta confirmada del propietario. No se enviará un enlace mágico.</p></div></div>}
-      <footer><button type="button" className="secondary" onClick={step===1?close:()=>setStep(v=>v-1)}>{step===1?"Cancelar":"Anterior"}</button>{step<3?<button type="button" className="primary" onClick={()=>setStep(v=>v+1)}>Continuar</button>:<button className="primary" disabled={saving||ownerPassword!==confirmPassword}>{saving?"Creando empresa…":"Crear empresa y propietario"}</button>}</footer>
-    </form></section></div>}
-  </div>
-}
-function SuperAdminPanel({store,notify}:{store:ReturnType<typeof useParkingStore>;notify:(v:string)=>void}){const [open,setOpen]=useState(false),[name,setName]=useState(""),[slug,setSlug]=useState(""),[lotName,setLotName]=useState(""),[lotCode,setLotCode]=useState(""),[capacity,setCapacity]=useState(100),[saving,setSaving]=useState(false);async function create(e:FormEvent){e.preventDefault();setSaving(true);try{await store.createBusiness({name,slug,lotName,lotCode,capacity});setOpen(false);setName("");notify("Negocio y sucursal inicial creados correctamente")}catch(error){notify(error instanceof Error?error.message:"No fue posible crear el negocio")}finally{setSaving(false)}}return <><div className="screen super-admin-head"><section className="intro compact"><div><p className="eyebrow">CONTROL DE PLATAFORMA</p><h2>Super administración</h2><p>Crea negocios, sucursales, dueños y administradores desde un solo lugar.</p></div><button className="primary" onClick={()=>setOpen(v=>!v)}><Plus size={17}/> Nuevo negocio</button></section>{open&&<article className="card inline-form business-form"><div><p className="eyebrow">ALTA DE NEGOCIO</p><h3>Configura la empresa y su primera sucursal</h3></div><form onSubmit={create}><label>Nombre del negocio<input value={name} onChange={e=>{setName(e.target.value);setSlug(e.target.value.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g,"").replace(/[^a-z0-9]+/g,"-").replace(/^-|-$/g,""))}} required/></label><label>Identificador<input value={slug} onChange={e=>setSlug(e.target.value)} placeholder="estacionamiento-centro" required/></label><label>Primera sucursal<input value={lotName} onChange={e=>setLotName(e.target.value)} placeholder="Sucursal Centro" required/></label><label>Código<input value={lotCode} onChange={e=>setLotCode(e.target.value.toUpperCase())} placeholder="CTR" maxLength={8} required/></label><label>Capacidad<input type="number" min={1} value={capacity} onChange={e=>setCapacity(Number(e.target.value))} required/></label><div><button type="button" className="secondary" onClick={()=>setOpen(false)}>Cancelar</button><button className="primary" disabled={saving}>{saving?"Creando…":"Crear negocio"}</button></div></form></article>}<section className="access-summary"><article><ShieldCheck/><div><small>Nivel de acceso</small><b>Control total</b></div></article><article><ParkingCircle/><div><small>Sucursales registradas</small><b>{store.lots.length}</b></div></article><article><Users/><div><small>Usuarios visibles</small><b>{store.staff.length}</b></div></article></section></div><Staff store={store} notify={notify}/></>}
-function LegacyStaff({store,notify}:{store:ReturnType<typeof useParkingStore>;notify:(v:string)=>void}){
-  const [adding,setAdding]=useState(false),[name,setName]=useState(""),[email,setEmail]=useState(""),[role,setRole]=useState("operator"),[lotId,setLotId]=useState(store.lotId),[saving,setSaving]=useState(false);
-  const [editingId,setEditingId]=useState<string|null>(null),[active,setActive]=useState(true);
-  const [permissionCodes,setPermissionCodes]=useState<string[]>(rolePermissionDefaults.operator);
-  const [newPassword,setNewPassword]=useState(""),[confirmNewPassword,setConfirmNewPassword]=useState("");
-  const [credentials,setCredentials]=useState<{name:string;email:string;password:string}|null>(null);
-  const allowedRoles=store.profile.role==="super_admin"?["owner","admin","cashier","operator","viewer"]:store.profile.role==="owner"?["admin","cashier","operator","viewer"]:["cashier","operator","viewer"];
-  const availableLots=store.lots.filter(l=>store.profile.role==="super_admin"||store.profile.allowedLotIds.includes(l.id));
-  function close(){if(saving)return;setAdding(false);setEditingId(null);setCredentials(null)}
-  function openCreate(){setName("");setEmail("");setRole("operator");setPermissionCodes(rolePermissionDefaults.operator);setLotId(availableLots[0]?.id??store.lotId);setActive(true);setEditingId(null);setNewPassword("");setConfirmNewPassword("");setCredentials(null);setAdding(true)}
-  function openEdit(user:(typeof store.staff)[number]){setName(user.fullName);setEmail(user.email==="Usuario registrado"?"":user.email);setRole(user.role);setPermissionCodes(user.permissionCodes.length?user.permissionCodes:rolePermissionDefaults[user.role]??[]);setLotId(user.lotIds[0]??availableLots[0]?.id??store.lotId);setActive(user.status==="active");setEditingId(user.id);setNewPassword("");setConfirmNewPassword("");setCredentials(null);setAdding(true)}
-  function setModuleAccess(view:string,manage:readonly string[],level:"none"|"view"|"manage"){setPermissionCodes(current=>{const removed=current.filter(code=>code!==view&&!manage.includes(code));return level==="none"?removed:level==="view"?[...removed,view]:[...removed,view,...manage]})}
-  function generateNewPassword(){const chars="ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789!@#$%";const bytes=crypto.getRandomValues(new Uint8Array(14));const password=Array.from(bytes,b=>chars[b%chars.length]).join("");setNewPassword(password);setConfirmNewPassword(password)}
-  async function add(e:FormEvent){
-    e.preventDefault();setSaving(true);
-    try{
-      if(editingId){if(newPassword&&newPassword.length<8)throw new Error("La nueva contraseña debe tener al menos 8 caracteres");if(newPassword!==confirmNewPassword)throw new Error("Las contraseñas no coinciden");await store.updateStaff({id:editingId,fullName:name.trim(),email:email.trim()||undefined,role,lotIds:[lotId],permissionCodes,active,newPassword:newPassword||undefined});close();notify(newPassword?"Usuario y contraseña actualizados":"Usuario actualizado correctamente");return}
-      const created=await store.inviteStaff({fullName:name.trim(),email:email.trim(),role,lotIds:[lotId],permissionCodes});
-      setCredentials({name:created.fullName,email:created.email,password:created.temporaryPassword});
-      setName("");setEmail("");
-      notify("Usuario creado y activado correctamente");
-    }catch(error){notify(error instanceof Error?error.message:"No fue posible crear el usuario")}
-    finally{setSaving(false)}
-  }
-  async function copyCredentials(){
-    if(!credentials)return;
-    try{await navigator.clipboard.writeText(`Usuario: ${credentials.email}\nContraseña temporal: ${credentials.password}`);notify("Credenciales copiadas")}
-    catch{notify("No fue posible copiar; selecciona la contraseña manualmente")}
-  }
-  return <div className="screen">
-    <section className="intro compact"><div><p className="eyebrow">CONTROL DE ACCESO</p><h2>{store.profile.role==="super_admin"?"Administradores y usuarios":"Personal y permisos"}</h2><p>{store.profile.role==="super_admin"?"Control global de propietarios, administradores y sucursales.":"Los usuarios solo pueden operar las sucursales que les asignes."}</p></div><button className="primary" onClick={openCreate}><UserPlus size={17}/> Nuevo usuario</button></section>
-    <section className="access-summary"><article><ShieldCheck/><div><small>Tu nivel de acceso</small><b>{roleLabel(store.profile.role)}</b></div></article><article><Users/><div><small>Usuarios visibles</small><b>{store.staff.length}</b></div></article><article><ParkingCircle/><div><small>Sucursales administrables</small><b>{store.profile.allowedLotIds.length}</b></div></article></section>
-    <article className="card table-card"><table><thead><tr><th>Usuario</th><th>Rol</th><th>Sucursal</th><th>Estado</th><th>Acciones</th></tr></thead><tbody>{store.staff.length?store.staff.map(r=><tr key={r.id}><td><b>{r.fullName}</b><small className="table-subtitle">{r.email}</small></td><td>{roleLabel(r.role)}</td><td>{r.lotIds.map(id=>store.lots.find(l=>l.id===id)?.name??id).join(" · ")}</td><td><em className={`status-pill ${r.status!=="active"?"pending":""}`}>● {r.status==="invited"?"Invitado":r.status==="inactive"?"Inactivo":"Activo"}</em></td><td>{r.role!=="owner"&&!(store.profile.role==="admin"&&r.role==="admin")&&<button type="button" className="table-action" onClick={()=>openEdit(r)}><Pencil size={14}/> Editar</button>}</td></tr>):<tr><td colSpan={5} className="empty">Aún no hay usuarios para mostrar.</td></tr>}</tbody></table></article>
-    {adding&&<div className="backdrop" onMouseDown={close}><section className="modal staff-modal" role="dialog" aria-modal="true" aria-labelledby="staff-modal-title" onMouseDown={e=>e.stopPropagation()}><button className="close" onClick={close} aria-label="Cerrar">×</button>{credentials?<div className="credential-success"><span className="credential-success-icon"><CheckCircle2/></span><p className="eyebrow">USUARIO CREADO</p><h2 id="staff-modal-title">Acceso listo</h2><p>{credentials.name} ya puede iniciar sesión. Comparte estas credenciales de forma segura.</p><div className="credential-box"><label>Correo electrónico<strong>{credentials.email}</strong></label><label>Contraseña temporal<strong className="temporary-password">{credentials.password}</strong></label><button type="button" className="secondary copy-credentials" onClick={copyCredentials}><Copy size={16}/> Copiar credenciales</button></div><div className="credential-warning"><KeyRound size={18}/><p>Esta contraseña se muestra una sola vez. El usuario deberá cambiarla al iniciar sesión.</p></div><button type="button" className="primary full" onClick={close}>Finalizar</button></div>:<><ModalHeader overline={editingId?"EDITAR USUARIO":"NUEVO USUARIO"} title={editingId?"Actualizar acceso":"Crear acceso"} text={editingId?"Modifica los datos, módulos y estado del colaborador.":"Asigna rol, sucursal y módulos. ParkFlow generará una contraseña temporal segura."}/><form onSubmit={add} className="staff-modal-form"><div className="staff-modal-grid"><label>Nombre completo<input autoFocus value={name} onChange={e=>setName(e.target.value)} placeholder="Nombre del colaborador" autoComplete="name" required/></label><label>Correo electrónico<input type="email" value={email} onChange={e=>setEmail(e.target.value)} placeholder={editingId?"Déjalo vacío para conservarlo":"usuario@empresa.com"} autoComplete="email" required={!editingId}/></label><label>Rol<select value={role} onChange={e=>{setRole(e.target.value);setPermissionCodes(rolePermissionDefaults[e.target.value]??[] as string[])}}>{allowedRoles.map(r=><option key={r} value={r}>{roleLabel(r)}</option>)}</select></label><label>Sucursal<select value={lotId} onChange={e=>setLotId(e.target.value)} required>{availableLots.map(l=><option key={l.id} value={l.id}>{l.name}</option>)}</select></label>{editingId&&<label>Estado<select value={active?"active":"inactive"} onChange={e=>setActive(e.target.value==="active")}><option value="active">Activo</option><option value="inactive">Inactivo</option></select></label>}</div><section className="module-access"><header><div><b>Módulos y nivel de acceso</b><small>Personaliza exactamente lo que este usuario podrá consultar o administrar.</small></div></header>{accessModules.map(item=>{const level=!permissionCodes.includes(item.view)?"none":item.manage.length&&item.manage.every(code=>permissionCodes.includes(code))?"manage":"view";return <label key={item.id}><span><b>{item.label}</b><small>{item.description}</small></span><select value={level} onChange={e=>setModuleAccess(item.view,item.manage,e.target.value as "none"|"view"|"manage")}><option value="none">Sin acceso</option><option value="view">Solo consulta</option>{item.manage.length>0&&<option value="manage">Administrar</option>}</select></label>})}</section>{editingId&&<section className="password-reset"><header><span><KeyRound size={18}/></span><div><b>Restablecer contraseña</b><small>Úsalo solamente cuando el colaborador no recuerde su acceso.</small></div><button type="button" className="secondary" onClick={generateNewPassword}>Generar segura</button></header><div className="staff-modal-grid"><label>Nueva contraseña<input type="text" value={newPassword} onChange={e=>setNewPassword(e.target.value)} placeholder="Mínimo 8 caracteres" minLength={8} autoComplete="new-password"/></label><label>Confirmar contraseña<input type="text" value={confirmNewPassword} onChange={e=>setConfirmNewPassword(e.target.value)} placeholder="Repite la contraseña" minLength={8} autoComplete="new-password"/>{confirmNewPassword&&newPassword!==confirmNewPassword&&<small className="field-error">Las contraseñas no coinciden.</small>}</label></div></section>}{!editingId&&<div className="password-notice"><KeyRound size={18}/><div><b>Contraseña generada automáticamente</b><small>La cuenta quedará confirmada y activa, sin enlace mágico.</small></div></div>}<footer className="staff-modal-footer"><button type="button" className="secondary" onClick={close}>Cancelar</button><button className="primary" type="submit" disabled={saving||!availableLots.length||!permissionCodes.length||Boolean(newPassword&&newPassword!==confirmNewPassword)}>{saving?"Guardando…":editingId?"Guardar cambios":"Crear usuario"}</button></footer></form></>}</section></div>}
-  </div>
-}
-function Staff({store,notify}:{store:ReturnType<typeof useParkingStore>;notify:(v:string)=>void}){
-  const [open,setOpen]=useState(false),[editingId,setEditingId]=useState<string|null>(null),[saving,setSaving]=useState(false),[credentials,setCredentials]=useState<{name:string;email:string;password:string}|null>(null);
-  const [name,setName]=useState(""),[email,setEmail]=useState(""),[role,setRole]=useState("operator"),[lotId,setLotId]=useState(store.lotId),[active,setActive]=useState(true),[permissionCodes,setPermissionCodes]=useState<string[]>(rolePermissionDefaults.operator),[password,setPassword]=useState(""),[confirmPassword,setConfirmPassword]=useState("");
-  const [query,setQuery]=useState(""),[status,setStatus]=useState<"all"|"active"|"inactive">("all");
-  const availableLots=store.lots.filter(l=>store.profile.role==="super_admin"||store.profile.allowedLotIds.includes(l.id)),allowedRoles=store.profile.role==="super_admin"?["owner","admin","cashier","operator","viewer"]:store.profile.role==="owner"?["admin","cashier","operator","viewer"]:["cashier","operator","viewer"];
-  const filteredStaff=store.staff.filter(user=>(status==="all"||(status==="active"?user.status==="active":user.status!=="active"))&&`${user.fullName} ${user.email} ${roleLabel(user.role)}`.toLowerCase().includes(query.toLowerCase()));
-  function close(){if(saving)return;setOpen(false);setCredentials(null)}
-  function openCreate(){setEditingId(null);setName("");setEmail("");setRole("operator");setLotId(availableLots[0]?.id??store.lotId);setActive(true);setPermissionCodes(rolePermissionDefaults.operator);setPassword("");setConfirmPassword("");setCredentials(null);setOpen(true)}
-  function openEdit(user:(typeof store.staff)[number]){setEditingId(user.id);setName(user.fullName);setEmail(user.email==="Usuario registrado"?"":user.email);setRole(user.role);setLotId(user.lotIds[0]??availableLots[0]?.id??store.lotId);setActive(user.status==="active");setPermissionCodes(user.permissionCodes.length?user.permissionCodes:rolePermissionDefaults[user.role]??[]);setPassword("");setConfirmPassword("");setCredentials(null);setOpen(true)}
-  function selectRole(nextRole:string){setRole(nextRole);setPermissionCodes(rolePermissionDefaults[nextRole]??[])}
-  function moduleLevel(item:(typeof accessModules)[number]){if(!permissionCodes.includes(item.view))return "none";return item.manage.length&&item.manage.every(code=>permissionCodes.includes(code))?"manage":"view"}
-  function toggleModule(item:(typeof accessModules)[number]){const level=moduleLevel(item);setModuleAccess(item,level==="none"?"view":"none")}
-  function setModuleAccess(item:(typeof accessModules)[number],level:"none"|"view"|"manage"){setPermissionCodes(current=>{const removed=current.filter(code=>code!==item.view&&!item.manage.includes(code));return level==="none"?removed:level==="view"?[...removed,item.view]:[...removed,item.view,...item.manage]})}
-  function generatePassword(){const chars="ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789!@#$%",bytes=crypto.getRandomValues(new Uint8Array(14)),value=Array.from(bytes,b=>chars[b%chars.length]).join("");setPassword(value);setConfirmPassword(value)}
-  async function submit(e:FormEvent){e.preventDefault();if(!permissionCodes.length)return notify("Asigna al menos un módulo");if(password&&password.length<8)return notify("La contraseña debe tener al menos 8 caracteres");if(password!==confirmPassword)return notify("Las contraseñas no coinciden");setSaving(true);try{if(editingId){await store.updateStaff({id:editingId,fullName:name.trim(),email:email.trim()||undefined,role,lotIds:[lotId],permissionCodes,active,newPassword:password||undefined});setOpen(false);notify("Usuario actualizado correctamente")}else{const created=await store.inviteStaff({fullName:name.trim(),email:email.trim(),role,lotIds:[lotId],permissionCodes});setCredentials({name:created.fullName,email:created.email,password:created.temporaryPassword});notify("Usuario creado correctamente")}}catch(error){notify(error instanceof Error?error.message:"No fue posible guardar el usuario")}finally{setSaving(false)}}
-  async function copyCredentials(){if(!credentials)return;try{await navigator.clipboard.writeText(`Usuario: ${credentials.email}\nContraseña temporal: ${credentials.password}`);notify("Credenciales copiadas")}catch{notify("No fue posible copiar las credenciales")}}
-  return <div className="screen staff-v2"><section className="staff-toolbar"><div className="staff-search"><Search size={17}/><input value={query} onChange={e=>setQuery(e.target.value)} placeholder="Buscar nombre, correo o rol"/></div><div className="staff-status-filters">{([['all',`Todos ${store.staff.length}`],['active',`Activos ${store.staff.filter(u=>u.status==='active').length}`],['inactive',`Inactivos ${store.staff.filter(u=>u.status!=='active').length}`]] as const).map(([value,label])=><button key={value} className={status===value?"active":""} onClick={()=>setStatus(value)}>{label}</button>)}</div><button className="primary" onClick={openCreate}><UserPlus size={16}/> Nuevo usuario</button></section><section className="staff-list"><header><span>USUARIO</span><span>ACCESO</span><span>MÓDULOS</span><span>ESTADO</span><i/></header>{filteredStaff.map(user=><button className={`staff-list-row ${user.status!=="active"?"inactive":""}`} key={user.id} onClick={()=>openEdit(user)}><span className="staff-identity"><i>{user.fullName.split(" ").map(v=>v[0]).join("").slice(0,2)}</i><b>{user.fullName}<small>{user.email}</small></b></span><span><em>{roleLabel(user.role)}</em><small>{user.lotIds.map(id=>store.lots.find(l=>l.id===id)?.name).filter(Boolean).join(" · ")}</small></span><span><b>{user.permissionCodes.length?accessModules.filter(item=>user.permissionCodes.includes(item.view)).length:(rolePermissionDefaults[user.role]??[]).filter(code=>accessModules.some(item=>item.view===code)).length}</b><small>módulos asignados</small></span><span className={`staff-state ${user.status}`}><i/>{user.status==="active"?"Activo":"Inactivo"}</span><ChevronRight/></button>)}{!filteredStaff.length&&<div className="empty">No encontramos usuarios con estos filtros.</div>}</section>
-    {open&&<div className="backdrop" onMouseDown={close}><section className="modal staff-access-modal" role="dialog" aria-modal="true" onMouseDown={e=>e.stopPropagation()}><button className="close" onClick={close}>×</button>{credentials?<div className="credential-success"><span className="credential-success-icon"><CheckCircle2/></span><p className="eyebrow">USUARIO CREADO</p><h2>Acceso listo</h2><p>{credentials.name} ya puede iniciar sesión. La contraseña solo se mostrará esta vez.</p><div className="credential-box"><label>Correo<strong>{credentials.email}</strong></label><label>Contraseña temporal<strong className="temporary-password">{credentials.password}</strong></label><button className="secondary copy-credentials" onClick={()=>void copyCredentials()}><Copy size={16}/> Copiar credenciales</button></div><button className="primary full" onClick={close}>Entendido</button></div>:<form onSubmit={submit}><ModalHeader overline={editingId?"EDITAR USUARIO":"NUEVO USUARIO"} title={editingId?name||"Actualizar usuario":"Crear acceso"} text={editingId?email||"Actualiza identidad, módulos y permisos.":"Crea un miembro del equipo y genera una contraseña temporal."}/><section className="access-form-section"><header><KeyRound/><div><b>Datos de acceso</b><small>Identidad y sucursal principal del colaborador.</small></div></header><div className="staff-modal-grid"><label>Nombre completo<input autoFocus value={name} onChange={e=>setName(e.target.value)} placeholder="Ana Torres" required/></label><label>Correo electrónico<input type="email" value={email} onChange={e=>setEmail(e.target.value)} placeholder="ana@negocio.com" required={!editingId}/></label><label>Sucursal asignada<select value={lotId} onChange={e=>setLotId(e.target.value)}>{availableLots.map(l=><option value={l.id} key={l.id}>{l.name}</option>)}</select></label>{editingId&&<label>Estado<select value={active?"active":"inactive"} onChange={e=>setActive(e.target.value==="active")}><option value="active">Activo</option><option value="inactive">Inactivo</option></select></label>}</div></section><section className="role-selector"><h3>Rol</h3><div>{roleOptions.filter(option=>allowedRoles.includes(option.id)).map(option=><button type="button" key={option.id} className={role===option.id?"active":""} onClick={()=>selectRole(option.id)}><i>{role===option.id&&<span/>}</i><b>{option.label}<small>{option.description}</small></b></button>)}</div></section><section className="syntra-module-selector"><header><div><h3>Módulos a operar</h3><p>Activa cada módulo y define si puede consultar o administrar.</p></div><em>{accessModules.filter(item=>permissionCodes.includes(item.view)).length} seleccionados</em></header><div className="syntra-module-grid">{accessModules.map(item=>{const level=moduleLevel(item),active=level!=="none";return <article className={active?"active":""} key={item.id}><button type="button" className="module-main" onClick={()=>toggleModule(item)}><span><AccessModuleIcon id={item.id}/></span><b>{item.label}<small>{item.description}</small></b><i>{active&&"✓"}</i></button>{active&&<div className="module-actions"><button type="button" className={level==="view"?"active":""} onClick={()=>setModuleAccess(item,"view")}>Consultar</button>{item.manage.length>0&&<button type="button" className={level==="manage"?"active":""} onClick={()=>setModuleAccess(item,"manage")}>{item.id==="entries"?"Operar":item.id==="reports"?"Exportar":"Administrar"}</button>}</div>}</article>})}</div></section>{editingId&&<section className="access-form-section password-section"><header><KeyRound/><div><b>Nueva contraseña</b><small>Opcional. El usuario deberá cambiarla al iniciar sesión.</small></div><button type="button" className="secondary" onClick={generatePassword}>Generar segura</button></header><div className="staff-modal-grid"><label>Nueva contraseña<input type="text" value={password} onChange={e=>setPassword(e.target.value)} minLength={8}/></label><label>Confirmar contraseña<input type="text" value={confirmPassword} onChange={e=>setConfirmPassword(e.target.value)} minLength={8}/></label></div></section>}<footer className="staff-modal-footer"><button type="button" className="secondary" onClick={close}>Cancelar</button><button className="primary" disabled={saving||!permissionCodes.length}>{saving?"Guardando…":editingId?"Guardar cambios":"Crear usuario"}</button></footer></form>}</section></div>}
-  </div>
-}
-function AccessModuleIcon({id}:{id:string}){if(id==="dashboard")return <LayoutDashboard/>;if(id==="entries")return <ArrowRightLeft/>;if(id==="shifts")return <WalletCards/>;if(id==="cashCuts")return <CalendarRange/>;if(id==="reports")return <BarChart3/>;if(id==="staff")return <Users/>;return <Settings2/>}
-
-function Settings({store,notify,navigationMode,onNavigationModeChange}:{store:ReturnType<typeof useParkingStore>;notify:(v:string)=>void;navigationMode:"sidebar"|"mosaic";onNavigationModeChange:(mode:"sidebar"|"mosaic")=>void}){
-  const [section,setSection]=useState<"appearance"|"rates"|"types"|"manuals">("appearance"),[drafts,setDrafts]=useState(store.rates),[savingId,setSavingId]=useState(""),[adding,setAdding]=useState(false),[manual,setManual]=useState<string|null>(null),[expandedRateId,setExpandedRateId]=useState<string|null>(null);
-  const canManageRates=["owner","super_admin"].includes(store.profile.role)||store.profile.permissionCodes.includes("rates.manage");
-  const [typeName,setTypeName]=useState(""),[typeDescription,setTypeDescription]=useState(""),[typePrice,setTypePrice]=useState(0),[typeFraction,setTypeFraction]=useState<15|30|45|60>(15);
-  useEffect(()=>setDrafts(store.rates),[store.rates]);
-  const lotRates=drafts.filter(r=>r.lotId===store.lotId);
-  function updateRate(id:string,changes:Partial<(typeof drafts)[number]>){setDrafts(v=>v.map(r=>r.id===id?{...r,...changes}:r))}
-  function closeRateEditor(){if(savingId)return;setDrafts(store.rates);setExpandedRateId(null)}
-  async function save(rate:(typeof drafts)[number]){setSavingId(rate.id);try{await store.saveRate(rate);setExpandedRateId(null);notify("Tarifa actualizada correctamente")}catch(error){notify(error instanceof Error?error.message:"No fue posible guardar la tarifa")}finally{setSavingId("")}}
-  async function addType(e:FormEvent){e.preventDefault();setSavingId("new");try{await store.createVehicleType({name:typeName,description:typeDescription,price:typePrice,fractionMinutes:typeFraction});setAdding(false);setTypeName("");setTypeDescription("");setTypePrice(0);notify("Tipo de unidad y tarifa creados")}catch(error){notify(error instanceof Error?error.message:"No fue posible crear el tipo de unidad")}finally{setSavingId("")}}
-  const manuals=[{id:"printer",icon:Printer,title:"Impresora térmica",text:"Instalación, papel, conexión USB o red e impresión de prueba.",steps:["Conecta la impresora y coloca papel térmico de 80 mm.","Instala el controlador indicado por el fabricante.","Selecciona la impresora predeterminada y realiza una impresión de prueba."]},{id:"scanner",icon:Barcode,title:"Pistola lectora",text:"Configura lectores USB para QR y códigos de barras.",steps:["Conecta el lector en modo teclado USB HID.","Configura el sufijo ENTER después de cada lectura.","Abre Entradas y salidas y escanea un boleto de prueba."]},{id:"camera",icon:ScanLine,title:"Cámara del celular",text:"Permisos y recomendaciones para escaneo móvil.",steps:["Abre ParkFlow desde HTTPS en Chrome o Safari.","Autoriza el acceso a la cámara trasera.","Mantén el código iluminado y dentro del marco."]},{id:"drawer",icon:WalletCards,title:"Cajón de dinero",text:"Conexión mediante impresora y apertura automática.",steps:["Conecta el cajón al puerto RJ11/RJ12 de la impresora.","Activa la apertura al finalizar la impresión.","Realiza un cobro de prueba antes de operar."]}];
-  return <div className="screen settings-screen"><nav className="settings-sections"><button className={section==="appearance"?"active":""} onClick={()=>setSection("appearance")}><LayoutDashboard/> Navegación</button><button className={section==="rates"?"active":""} onClick={()=>setSection("rates")}><CircleDollarSign/> Tarifas por unidad</button><button className={section==="types"?"active":""} onClick={()=>setSection("types")}><Truck/> Tipos de unidad</button><button className={section==="manuals"?"active":""} onClick={()=>setSection("manuals")}><BookOpen/> Manuales y dispositivos</button></nav>
-    {section==="appearance"&&<><div className="settings-section-head"><div><p className="eyebrow">EXPERIENCIA DE NAVEGACIÓN</p><h2>Elige cómo quieres trabajar</h2><p>La preferencia se guarda únicamente en este dispositivo.</p></div></div><div className="navigation-mode-grid"><button className={navigationMode==="sidebar"?"active":""} onClick={()=>onNavigationModeChange("sidebar")}><span><Settings2/><i/><i/><i/></span><div><b>Menú lateral</b><small>Dashboard tradicional con acceso permanente a los módulos.</small></div><em>{navigationMode==="sidebar"?"✓ Seleccionado":"Seleccionar"}</em></button><button className={navigationMode==="mosaic"?"active":""} onClick={()=>onNavigationModeChange("mosaic")}><span><LayoutDashboard/><i/><i/><i/><i/></span><div><b>Inicio en mosaico</b><small>Experiencia visual inspirada en Syntra POS.</small></div><em>{navigationMode==="mosaic"?"✓ Seleccionado":"Seleccionar"}</em></button></div></>}
-    {section==="rates"&&<><div className="settings-section-head"><div><p className="eyebrow">REGLAS DE COBRO</p><h2>Tarifas por tipo de unidad</h2><p>{canManageRates?"Consulta y edita las tarifas sin salir de esta pantalla.":"Consulta las tarifas configuradas para la sucursal."}</p></div></div><div className="pricing-help"><CircleDollarSign/><div><b>Dos modalidades de cobro</b><p><strong>Por tiempo</strong> acumula fracciones. <strong>Tiempo libre</strong> cobra una cantidad fija sin importar la duración.</p></div></div><div className="vehicle-rate-grid compact-rates">{store.vehicleTypes.map(type=>{const rate=lotRates.find(r=>r.vehicleTypeId===type.id),summary=rate?.pricingMode==="free_time"?`${currency.format(rate.flatPrice??0)} · tiempo libre`:`${currency.format(rate?.price??0)} cada ${rate?.fractionMinutes??15} min`;return <article className={`card vehicle-rate-card collapsed mode-${rate?.pricingMode??"missing"}`} key={type.id}><header><span><UnitTypeIcon typeKey={type.key}/></span><div><small>TIPO DE UNIDAD</small><h3>{type.name}</h3><p>{summary}</p></div>{rate&&<em>{rate.pricingMode==="free_time"?"Tiempo libre":"Por tiempo"}</em>}{rate&&canManageRates&&<button className="rate-edit-toggle" onClick={()=>setExpandedRateId(rate.id)}>Editar<ChevronRight/></button>}</header>{!rate&&<div className="missing-rate">Ejecuta la migración para crear la tarifa de esta unidad.</div>}</article>})}</div></>}
-    {section==="types"&&<><div className="settings-section-head"><div><p className="eyebrow">CATÁLOGO OPERATIVO</p><h2>Tipos de unidad</h2><p>Estas opciones estarán disponibles al registrar cada entrada.</p></div>{canManageRates&&<button className="primary" onClick={()=>setAdding(true)}><Plus size={16}/> Nuevo tipo</button>}</div><div className="unit-type-list">{store.vehicleTypes.map(type=><article className="card" key={type.id}><span><UnitTypeIcon typeKey={type.key}/></span><div><small>{type.key.toUpperCase()}</small><h3>{type.name}</h3><p>{type.description||"Sin descripción"}</p></div><em>● Activo</em></article>)}</div></>}
-    {section==="manuals"&&<><div className="settings-section-head"><div><p className="eyebrow">CENTRO DE AYUDA</p><h2>Manuales y dispositivos</h2><p>Esta sección crecerá con nuevas guías de instalación y operación.</p></div></div><div className="manual-grid">{manuals.map(item=>{const Icon=item.icon,open=manual===item.id;return <article className={`card manual-card ${open?"open":""}`} key={item.id}><button onClick={()=>setManual(open?null:item.id)}><span><Icon/></span><div><h3>{item.title}</h3><p>{item.text}</p></div><ChevronRight/></button>{open&&<ol>{item.steps.map(step=><li key={step}>{step}</li>)}</ol>}</article>})}</div></>}
-    {expandedRateId&&(()=>{const rate=lotRates.find(r=>r.id===expandedRateId),type=store.vehicleTypes.find(t=>t.id===rate?.vehicleTypeId);return rate&&type?<div className="backdrop" onMouseDown={closeRateEditor}><section className="modal rate-modal" role="dialog" aria-modal="true" aria-labelledby="rate-modal-title" onMouseDown={e=>e.stopPropagation()}><button className="close" onClick={closeRateEditor} aria-label="Cerrar">×</button><ModalHeader overline="EDITAR TARIFA" title={`Tarifa para ${type.name}`} text="Define cómo se calculará el importe de esta unidad."/><div className="rate-editor"><div className="pricing-mode"><button type="button" className={rate.pricingMode==="fraction"?"active":""} onClick={()=>updateRate(rate.id,{pricingMode:"fraction"})}><Clock3/> Por tiempo</button><button type="button" className={rate.pricingMode==="free_time"?"active":""} onClick={()=>updateRate(rate.id,{pricingMode:"free_time",flatPrice:rate.flatPrice??rate.price})}><ParkingCircle/> Tiempo libre</button></div>{rate.pricingMode==="free_time"?<div className="free-time-fields compact"><label>Precio fijo por estancia<div className="input-affix"><span>$</span><input autoFocus type="number" min="0" step="0.01" value={rate.flatPrice??0} onChange={e=>updateRate(rate.id,{flatPrice:Number(e.target.value)})}/><span>MXN</span></div></label><div className="free-time-note"><CheckCircle2/><span><b>{currency.format(rate.flatPrice??0)} por tiempo libre</b><small>Mismo importe sin importar la duración.</small></span></div></div>:<div className="rate-fields"><label>Precio por fracción<div className="input-affix"><span>$</span><input autoFocus type="number" min="0" step="0.01" value={rate.price} onChange={e=>updateRate(rate.id,{price:Number(e.target.value)})}/><span>MXN</span></div></label><label>Duración<select value={rate.fractionMinutes} onChange={e=>updateRate(rate.id,{fractionMinutes:Number(e.target.value) as 15|30|45|60})}><option value="15">15 minutos</option><option value="30">30 minutos</option><option value="45">45 minutos</option><option value="60">1 hora</option></select></label><label>Tolerancia<input type="number" min="0" value={rate.graceMinutes} onChange={e=>updateRate(rate.id,{graceMinutes:Number(e.target.value)})}/><small>Minutos sin costo.</small></label><label>Máximo diario<input type="number" min="0" value={rate.dailyMax??0} onChange={e=>updateRate(rate.id,{dailyMax:Number(e.target.value)||null})}/><small>Usa 0 para no limitar.</small></label></div>}<div className="rate-preview"><span>{rate.pricingMode==="free_time"?"Total de la estancia":"Ejemplo por 1 hora"}</span><b>{currency.format(rate.pricingMode==="free_time"?rate.flatPrice??0:Math.ceil(60/rate.fractionMinutes)*rate.price)}</b></div><footer><button type="button" className="secondary" onClick={closeRateEditor}>Cancelar</button><button type="button" className="primary" onClick={()=>void save(rate)} disabled={savingId===rate.id}>{savingId===rate.id?"Guardando…":"Guardar tarifa"}</button></footer></div></section></div>:null})()}
-    {adding&&<div className="backdrop" onMouseDown={()=>setAdding(false)}><section className="modal vehicle-type-modal" onMouseDown={e=>e.stopPropagation()}><button className="close" onClick={()=>setAdding(false)}>×</button><form onSubmit={addType}><ModalHeader overline="NUEVO TIPO" title="Alta de tipo de unidad" text="La nueva clasificación se agregará a entradas y tendrá su propia tarifa."/><label>Nombre<input autoFocus value={typeName} onChange={e=>setTypeName(e.target.value)} placeholder="Ej. Motocicleta" required/></label><label>Descripción<input value={typeDescription} onChange={e=>setTypeDescription(e.target.value)} placeholder="Descripción breve"/></label><div className="form-grid"><label>Precio inicial<input type="number" min="0" step="0.01" value={typePrice} onChange={e=>setTypePrice(Number(e.target.value))} required/></label><label>Fracción<select value={typeFraction} onChange={e=>setTypeFraction(Number(e.target.value) as 15|30|45|60)}><option value="15">15 minutos</option><option value="30">30 minutos</option><option value="45">45 minutos</option><option value="60">1 hora</option></select></label></div><button className="primary full" disabled={savingId==="new"}>{savingId==="new"?"Creando…":"Crear tipo y tarifa"}</button></form></section></div>}
-  </div>
-}
-function UnitTypeIcon({typeKey}:{typeKey:string}){return typeKey==="truck"?<Truck/>:<CarFront/>}
-
-function LoginScreen({error,saving,onLogin,onRegister}:{error:string;saving:boolean;onLogin:(identifier:string,password:string)=>Promise<SyntraSignInResult>;onRegister:(input:{name:string;slug:string;lotName:string;lotCode:string;capacity:number;ownerName:string;ownerEmail:string;ownerPassword:string})=>Promise<void>}){
-  const [registering,setRegistering]=useState(false),[step,setStep]=useState(1),[formError,setFormError]=useState("");
-  const [name,setName]=useState(""),[slug,setSlug]=useState(""),[lotName,setLotName]=useState("Sucursal principal"),[lotCode,setLotCode]=useState("MATRIZ"),[capacity,setCapacity]=useState(100);
-  const [ownerName,setOwnerName]=useState(""),[ownerEmail,setOwnerEmail]=useState(""),[ownerPassword,setOwnerPassword]=useState(""),[confirmPassword,setConfirmPassword]=useState("");
-  function back(){if(step>1)setStep(v=>v-1);else{setRegistering(false);setFormError("")}}
-  function next(){setFormError("");if(step===1&&(!name.trim()||!slug.trim()))return setFormError("Completa el nombre de la empresa.");if(step===2&&(!lotName.trim()||!lotCode.trim()||capacity<1))return setFormError("Completa los datos de la primera sucursal.");setStep(v=>Math.min(3,v+1))}
-  async function create(e:FormEvent){e.preventDefault();setFormError("");if(!ownerName.trim()||!ownerEmail.trim())return setFormError("Completa los datos del propietario.");if(ownerPassword.length<8)return setFormError("La contraseña debe tener al menos 8 caracteres.");if(ownerPassword!==confirmPassword)return setFormError("Las contraseñas no coinciden.");try{await onRegister({name,slug,lotName,lotCode,capacity,ownerName,ownerEmail,ownerPassword})}catch{}}
-  if(registering)return <main className="onboarding-screen"><aside className="onboarding-brand"><img src="/syntra/logo-wordmark-dark.png" alt="Syntra Software"/><div><p>CONFIGURA TU ESPACIO</p><h1>Tu estacionamiento listo para operar.</h1><span>Registra tu empresa, primera sucursal y cuenta propietaria en tres pasos.</span></div><nav>{[[1,"Empresa"],[2,"Sucursal"],[3,"Propietario"]].map(([n,label])=><div key={n} className={step>=Number(n)?"active":""}><i>{step>Number(n)?"✓":n}</i><b>{label}</b></div>)}</nav><small>SYNTRA PARKFLOW · GESTIÓN PROFESIONAL</small></aside><section className="onboarding-form"><button className="onboarding-back" onClick={back}>← {step===1?"Volver al acceso":"Anterior"}</button><form onSubmit={create}><p className="eyebrow">PASO {step} DE 3</p>{step===1&&<><h2>Cuéntanos sobre tu empresa</h2><p className="onboarding-copy">Esta información identificará tu cuenta y aparecerá en la operación del estacionamiento.</p><label>Nombre comercial<input autoFocus value={name} onChange={e=>{const value=e.target.value;setName(value);setSlug(value.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g,"").replace(/[^a-z0-9]+/g,"-").replace(/^-|-$/g,""))}} placeholder="Ej. Estacionamientos del Centro" required/></label><label>Identificador del sistema<input value={slug} onChange={e=>setSlug(e.target.value.toLowerCase().replace(/[^a-z0-9-]/g,""))} placeholder="estacionamientos-del-centro" required/><small>Se genera automáticamente y puedes ajustarlo.</small></label></>}{step===2&&<><h2>Configura tu primera sucursal</h2><p className="onboarding-copy">Podrás agregar nuevas ubicaciones cuando ingreses al sistema.</p><div className="form-grid"><label>Nombre de sucursal<input autoFocus value={lotName} onChange={e=>setLotName(e.target.value)} placeholder="Sucursal principal" required/></label><label>Código<input value={lotCode} onChange={e=>setLotCode(e.target.value.toUpperCase())} maxLength={8} placeholder="MATRIZ" required/></label></div><label>Capacidad total<input type="number" min={1} value={capacity} onChange={e=>setCapacity(Number(e.target.value))} required/><small>Número de cajones disponibles en esta ubicación.</small></label></>}{step===3&&<><h2>Crea tu cuenta propietaria</h2><p className="onboarding-copy">Tendrás control completo de sucursales, tarifas, usuarios y reportes.</p><div className="form-grid"><label>Nombre completo<input autoFocus value={ownerName} onChange={e=>setOwnerName(e.target.value)} autoComplete="name" placeholder="Tu nombre" required/></label><label>Correo electrónico<input type="email" value={ownerEmail} onChange={e=>setOwnerEmail(e.target.value)} autoComplete="email" placeholder="propietario@empresa.com" required/></label><label>Contraseña<input type="password" value={ownerPassword} onChange={e=>setOwnerPassword(e.target.value)} minLength={8} autoComplete="new-password" placeholder="Mínimo 8 caracteres" required/></label><label>Confirmar contraseña<input type="password" value={confirmPassword} onChange={e=>setConfirmPassword(e.target.value)} minLength={8} autoComplete="new-password" placeholder="Repite la contraseña" required/></label></div><div className="creation-summary"><CheckCircle2/><p>La cuenta quedará activa inmediatamente. No se enviarán enlaces mágicos.</p></div></>}{(formError||error)&&<div className="onboarding-error">{formError||error}</div>}<footer>{step<3?<button type="button" className="primary full" onClick={next}>Continuar <ChevronRight size={17}/></button>:<button className="primary full" disabled={saving}>{saving?"Creando tu empresa…":"Crear empresa y comenzar"}</button>}<small>Al continuar aceptas los términos de servicio y el aviso de privacidad.</small></footer></form></section></main>;
-  return <SyntraLogin onSignIn={onLogin} onCreateBusiness={()=>{setRegistering(true);setStep(1)}} text={{subtitle:"Control profesional para estacionamientos"}}/>;
-}
-function roleLabel(role:string){return({super_admin:"Super administrador",owner:"Dueño del negocio",admin:"Administrador",cashier:"Cajero",operator:"Operador",viewer:"Consulta"} as Record<string,string>)[role]??role}
